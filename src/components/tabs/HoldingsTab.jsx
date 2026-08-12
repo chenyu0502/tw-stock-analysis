@@ -1,0 +1,224 @@
+import { useEffect, useMemo, useState } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import { Plus, AlertTriangle } from 'lucide-react';
+import { upsertHolding, removeHolding, updateHolding, setCash } from '../../store/portfolioSlice.js';
+import { loadQuotes, loadDailyStats } from '../../store/marketSlice.js';
+import { money, pct, num, int, changeColor } from '../../lib/format.js';
+import StockCard from '../StockCard.jsx';
+
+/** 單一標的市值佔比超過此門檻即提出集中度警示。 */
+const CONCENTRATION_THRESHOLD = 30;
+
+/**
+ * 持股頁：部位管理與損益總覽。
+ */
+export default function HoldingsTab() {
+  const dispatch = useDispatch();
+  const { holdings, cash } = useSelector((s) => s.portfolio);
+  const quotes = useSelector((s) => s.market.quotes);
+
+  const [form, setForm] = useState({ code: '', shares: '', price: '' });
+  const [message, setMessage] = useState('');
+
+  const codesKey = holdings.map((h) => h.code).join(',');
+
+  useEffect(() => {
+    if (!codesKey) return;
+    const list = codesKey.split(',');
+    dispatch(loadQuotes(list));
+    dispatch(loadDailyStats(list));
+  }, [codesKey, dispatch]);
+
+  const rows = useMemo(
+    () =>
+      holdings.map((h) => {
+        const price = quotes[h.code]?.price ?? null;
+        const cost = h.avgCost * h.shares;
+        const value = price === null ? null : price * h.shares;
+        const profit = value === null ? null : value - cost;
+        return {
+          ...h,
+          price,
+          cost,
+          value,
+          profit,
+          profitPercent: profit === null || cost === 0 ? null : (profit / cost) * 100,
+        };
+      }),
+    [holdings, quotes]
+  );
+
+  const summary = useMemo(() => {
+    const totalCost = rows.reduce((acc, r) => acc + r.cost, 0);
+    // 尚未取得報價的部位以成本計入市值，否則總市值會在載入過程中大幅低估。
+    const totalValue = rows.reduce((acc, r) => acc + (r.value ?? r.cost), 0);
+    const profit = totalValue - totalCost;
+    return {
+      totalCost,
+      totalValue,
+      profit,
+      profitPercent: totalCost === 0 ? null : (profit / totalCost) * 100,
+      netWorth: totalValue + cash,
+      // 持股佔淨值比例，用於判斷資金水位。
+      exposure: totalValue + cash === 0 ? null : (totalValue / (totalValue + cash)) * 100,
+    };
+  }, [rows, cash]);
+
+  const concentrated = useMemo(
+    () =>
+      summary.totalValue === 0
+        ? []
+        : rows
+            .map((r) => ({ code: r.code, share: ((r.value ?? r.cost) / summary.totalValue) * 100 }))
+            .filter((r) => r.share > CONCENTRATION_THRESHOLD)
+            .sort((a, b) => b.share - a.share),
+    [rows, summary.totalValue]
+  );
+
+  function handleAdd(e) {
+    e.preventDefault();
+    const code = form.code.trim();
+    const shares = Number(form.shares);
+    const price = Number(form.price);
+
+    if (!/^\d{4,6}[A-Z]?$/.test(code)) {
+      setMessage('代號格式不正確');
+      return;
+    }
+    if (!Number.isFinite(shares) || shares === 0) {
+      setMessage('股數需為非零數字，賣出請填負數');
+      return;
+    }
+    if (!Number.isFinite(price) || price <= 0) {
+      setMessage('價格需為正數');
+      return;
+    }
+
+    dispatch(upsertHolding({ code, shares, price }));
+    setForm({ code: '', shares: '', price: '' });
+    setMessage('');
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* 總覽 */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <SummaryCard label="總市值" value={money(summary.totalValue)} />
+        <SummaryCard label="總投入成本" value={money(summary.totalCost)} />
+        <SummaryCard
+          label="未實現損益"
+          value={money(summary.profit)}
+          sub={pct(summary.profitPercent, 2, true)}
+          tone={summary.profit}
+        />
+        <SummaryCard label="總淨值" value={money(summary.netWorth)} sub={`持股水位 ${pct(summary.exposure, 1)}`} />
+      </div>
+
+      {/* 現金 */}
+      <label className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/50 p-3 text-sm">
+        <span className="text-slate-400">帳上現金</span>
+        <input
+          type="number"
+          value={cash || ''}
+          onChange={(e) => dispatch(setCash(e.target.value))}
+          placeholder="0"
+          className="tabular flex-1 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-right"
+        />
+      </label>
+
+      {concentrated.length > 0 && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-800/60 bg-amber-950/30 p-3 text-xs text-amber-300">
+          <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+          <div>
+            <div className="font-medium">集中度風險警示</div>
+            <p className="mt-0.5 text-amber-400/80">
+              {concentrated.map((c) => `${c.code} 佔 ${num(c.share, 1)}%`).join('、')}
+              ，單一標的超過 {CONCENTRATION_THRESHOLD}% 時，個股利空對整體資產的衝擊會被放大。
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* 新增部位 */}
+      <form onSubmit={handleAdd} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <input
+          value={form.code}
+          onChange={(e) => setForm({ ...form, code: e.target.value })}
+          placeholder="代號"
+          inputMode="numeric"
+          className="tabular rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
+        />
+        <input
+          value={form.shares}
+          onChange={(e) => setForm({ ...form, shares: e.target.value })}
+          placeholder="股數（賣出填負數）"
+          type="number"
+          className="tabular rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
+        />
+        <input
+          value={form.price}
+          onChange={(e) => setForm({ ...form, price: e.target.value })}
+          placeholder="成交價"
+          type="number"
+          step="0.01"
+          className="tabular rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
+        />
+        <button
+          type="submit"
+          className="flex items-center justify-center gap-1.5 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-500"
+        >
+          <Plus size={15} /> 記錄交易
+        </button>
+      </form>
+
+      {message && <p className="text-xs text-amber-500">{message}</p>}
+
+      {rows.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-800 py-12 text-center text-sm text-slate-500">
+          尚無持股部位
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {rows.map((row) => (
+            <StockCard
+              key={row.code}
+              item={row}
+              onRemove={(code) => dispatch(removeHolding(code))}
+              onUpdate={(code, patch) => dispatch(updateHolding({ code, patch }))}
+              extra={
+                <div className="tabular grid grid-cols-4 gap-2 border-t border-slate-800/70 px-3 py-2 text-xs">
+                  <Cell label="股數" value={int(row.shares)} />
+                  <Cell label="均價" value={num(row.avgCost)} />
+                  <Cell label="市值" value={money(row.value)} />
+                  <Cell label="損益" value={money(row.profit)} sub={pct(row.profitPercent, 2, true)} tone={row.profit} />
+                </div>
+              }
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryCard({ label, value, sub, tone }) {
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-3">
+      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className={`tabular mt-1 text-base font-semibold ${tone === undefined ? 'text-slate-100' : changeColor(tone)}`}>
+        {value}
+      </div>
+      {sub && <div className={`tabular text-[11px] ${tone === undefined ? 'text-slate-500' : changeColor(tone)}`}>{sub}</div>}
+    </div>
+  );
+}
+
+function Cell({ label, value, sub, tone }) {
+  return (
+    <div>
+      <div className="text-[10px] text-slate-500">{label}</div>
+      <div className={tone === undefined ? 'text-slate-200' : changeColor(tone)}>{value}</div>
+      {sub && <div className={`text-[10px] ${tone === undefined ? 'text-slate-500' : changeColor(tone)}`}>{sub}</div>}
+    </div>
+  );
+}

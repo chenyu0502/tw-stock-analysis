@@ -1,0 +1,27 @@
+@import 'tailwindcss';
+
+@theme {
+  /* 台股慣例：紅漲綠跌。整站以這兩個語意色為準，不要直接用 red/green。 */
+  --color-up: oklch(0.64 0.21 25);
+  --color-down: oklch(0.7 0.16 158);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-slate-950);
+  color: var(--color-slate-100);
+  font-family: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif;
+  /* 行動裝置底部導覽列需要避開系統手勢區。 */
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* 數字對齊用等寬字型，避免表格中的位數跳動。 */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}

@@ -1,0 +1,81 @@
+/**
+ * 前端資料取用層。
+ *
+ * 一律走自家 /api/* 代理，不直接呼叫證交所或 Yahoo。
+ * 好處是沒有跨域問題、不依賴公開 CORS proxy，且 FinMind token 留在伺服器端不外洩。
+ */
+
+/**
+ * 呼叫自家 API 端點。
+ * @param {string} path 端點名稱，例如 'quote'
+ * @param {Record<string, string|number>} [params]
+ * @returns {Promise<*>}
+ */
+async function callApi(path, params = {}) {
+  const search = new URLSearchParams(
+    Object.entries(params)
+      .filter(([, v]) => v !== undefined && v !== null && v !== '')
+      .map(([k, v]) => [k, String(v)])
+  );
+
+  const res = await fetch(`/api/${path}?${search}`);
+  const json = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(json?.error ?? `API ${path} 回應 ${res.status}`);
+  }
+  return json;
+}
+
+/**
+ * 取得多檔即時報價。
+ * @param {string[]} codes
+ * @returns {Promise<{ quotes: Record<string, object>, missing: string[] }>}
+ */
+export function fetchQuotes(codes) {
+  if (!codes.length) return Promise.resolve({ quotes: {}, missing: [] });
+  return callApi('quote', { codes: codes.join(',') });
+}
+
+/**
+ * 取得單檔歷史 K 線。
+ * @param {string} code
+ * @param {{ range?: string, interval?: string }} [options]
+ * @returns {Promise<{ candles: object[] }>}
+ */
+export function fetchHistory(code, options = {}) {
+  const { range = '1y', interval = '1d' } = options;
+  return callApi('history', { code, range, interval });
+}
+
+/**
+ * 取得融資融券資料。
+ * @param {string[]} codes
+ */
+export function fetchMargin(codes) {
+  return callApi('margin', { codes: codes.join(',') });
+}
+
+/**
+ * 取得三大法人買賣超。
+ * @param {string[]} codes
+ * @param {number} [days] 帶入天數且伺服器設有 FinMind token 時回傳歷史序列
+ */
+export function fetchInstitutional(codes, days) {
+  return callApi('institutional', { codes: codes.join(','), days });
+}
+
+/**
+ * 取得本益比、股價淨值比、殖利率。
+ * @param {string[]} codes
+ */
+export function fetchValuation(codes) {
+  return callApi('valuation', { codes: codes.join(',') });
+}
+
+/**
+ * 取得全市場代號名稱對照表。資料量約 2000 筆，載入後應快取於記憶體。
+ */
+export function fetchUniverse() {
+  return callApi('universe');
+}

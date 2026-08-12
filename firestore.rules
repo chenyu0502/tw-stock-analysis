@@ -1,0 +1,16 @@
+rules_version = '2';
+
+// 投資組合資料屬於個人隱私，規則只允許使用者存取自己的文件。
+// 部署方式：Firebase Console → Firestore Database → 規則，貼上後發布。
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /portfolios/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // 未明確允許的路徑一律拒絕，避免日後新增集合時忘記設限。
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
