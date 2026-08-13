@@ -20,7 +20,9 @@ const DEFAULT_HEADERS = {
  * @returns {Promise<Response>}
  */
 export async function fetchWithRetry(url, options = {}) {
-  const { headers = {}, timeoutMs = 12000, retries = 2 } = options;
+  // 逾時與重試次數的乘積必須留在 vercel.json 設定的 maxDuration 之內，
+  // 否則函式會被平台中斷，使用者只會看到沒有訊息的 504。
+  const { headers = {}, timeoutMs = 8000, retries = 2 } = options;
   let lastError;
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {

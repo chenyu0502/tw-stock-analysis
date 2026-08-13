@@ -390,10 +390,14 @@ async function loadListedInstitutional() {
   for (const date of recentDates(8)) {
     let json;
     try {
-      json = await fetchJson(
-        `${TWSE_RWD}/fund/T86?date=${date}&selectType=ALL&response=json`,
-        { headers: { Referer: 'https://www.twse.com.tw/zh/trading/foreign/t86.html' } }
-      );
+      json = await fetchJson(`${TWSE_RWD}/fund/T86?date=${date}&selectType=ALL&response=json`, {
+        headers: { Referer: 'https://www.twse.com.tw/zh/trading/foreign/t86.html' },
+        // 逐日回溯本身就是一種重試機制，單次請求不再重試，逾時也壓短。
+        // 否則最壞情況是 8 個日期各自重試三次，累積時間會超過函式執行上限。
+        // 保留 8 天的回溯範圍是為了跨過農曆年的連續休市。
+        timeoutMs: 4000,
+        retries: 0,
+      });
     } catch {
       continue;
     }
