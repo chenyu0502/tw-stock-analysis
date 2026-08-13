@@ -11,7 +11,6 @@
  */
 
 import { createSlice, nanoid } from '@reduxjs/toolkit';
-import { tradeCost } from '../lib/fees.js';
 
 /** 均線天數的預設值，可由使用者調整或由回測最佳化覆寫。 */
 export const DEFAULT_MA = { short: 20, long: 60 };
@@ -80,14 +79,16 @@ const portfolioSlice = createSlice({
      * 記錄一筆交易並更新持股。
      *
      * payload: { code, shares, price, date?, fee?, note? }
-     * shares 正為買進、負為賣出。fee 未指定時依台股費率自動計算。
+     * shares 正為買進、負為賣出。
+     *
+     * price 的定義是**已含手續費與交易稅的單位成本**，也就是券商對帳單上的成本均價。
+     * 使用者直接填入實際數字，程式不再自行加計費用，否則會重複計算一次。
+     * 因此 fee 預設為零；仍保留這個欄位，供日後需要拆分帳務時使用。
      */
     recordTrade(state, action) {
       const { code, shares, price } = action.payload;
       const date = action.payload.date || today();
-      const fee = Number.isFinite(action.payload.fee)
-        ? action.payload.fee
-        : tradeCost({ code, shares, price }).total;
+      const fee = Number.isFinite(action.payload.fee) ? action.payload.fee : 0;
 
       const existing = state.holdings.find((h) => h.code === code);
       let realized = null;
@@ -117,6 +118,7 @@ const portfolioSlice = createSlice({
         state.holdings.push({
           code,
           shares,
+          // price 已是含費用的單位成本，原樣採用，不再加計 fee。
           avgCost: price + fee / shares,
           note: action.payload.note ?? '',
           maShort: action.payload.maShort ?? DEFAULT_MA.short,
@@ -133,7 +135,7 @@ const portfolioSlice = createSlice({
         state.holdings = state.holdings.filter((h) => h.code !== code);
         return;
       }
-      // 買進才需要重算平均成本，並把手續費計入成本。賣出不改變剩餘部位的成本。
+      // 買進才需要重算平均成本，以股數加權。賣出不改變剩餘部位的成本。
       if (shares > 0) {
         existing.avgCost =
           (existing.avgCost * existing.shares + price * shares + fee) / totalShares;

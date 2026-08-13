@@ -84,12 +84,17 @@ export default function HoldingsTab() {
     [rows, summary.totalValue]
   );
 
-  // 即時試算這筆交易的成本，讓使用者送出前就看到手續費與證交稅。
+  // 手續費與證交稅的參考試算。
+  //
+  // 這個數字不會被計入成本：成本均價由使用者直接填入且已含費用，
+  // 程式再加一次就會重複計算。這裡只是讓使用者在手邊沒有對帳單時，
+  // 能自行推算含費用的單位成本。
   const estimatedCost = useMemo(() => {
     const shares = Number(form.shares);
     const price = Number(form.price);
     if (!form.code || !Number.isFinite(shares) || !Number.isFinite(price) || price <= 0) return null;
-    return tradeCost({ code: form.code, shares, price });
+    const cost = tradeCost({ code: form.code, shares, price });
+    return { ...cost, unitCost: price + cost.total / Math.abs(shares) };
   }, [form]);
 
   function handleTrade(e) {
@@ -216,9 +221,10 @@ export default function HoldingsTab() {
           <input
             value={form.price}
             onChange={(e) => setForm({ ...form, price: e.target.value })}
-            placeholder="成交價"
+            placeholder="成本均價（含費用）"
             type="number"
-            step="0.01"
+            // 券商對帳單的成本均價常帶到小數點後四位，輸入時如實保留，顯示才取兩位。
+            step="0.0001"
             className="tabular rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
           />
           <input
@@ -238,12 +244,15 @@ export default function HoldingsTab() {
           </button>
           {estimatedCost && (
             <span className="tabular text-xs text-slate-500">
-              預估成本 手續費 {money(estimatedCost.brokerFee)}
-              {estimatedCost.tax > 0 && ` ＋ 證交稅 ${money(estimatedCost.tax)}`}
-              ，合計 {money(estimatedCost.total)}
+              參考：手續費約 {money(estimatedCost.brokerFee)}
+              {estimatedCost.tax > 0 && ` ＋ 證交稅約 ${money(estimatedCost.tax)}`}
+              ，若上方填的是純成交價，含費用單位成本約 {num(estimatedCost.unitCost, 4)}
             </span>
           )}
         </div>
+        <p className="text-[11px] text-slate-600">
+          成本均價請填券商對帳單上已含手續費的數字，程式不會再自行加計。參考試算僅供換算，不影響記錄。
+        </p>
       </form>
 
       {message && <p className="text-xs text-amber-500">{message}</p>}
@@ -263,7 +272,7 @@ export default function HoldingsTab() {
               extra={
                 <div className="tabular grid grid-cols-4 gap-2 border-t border-slate-800/70 px-3 py-2 text-xs">
                   <Cell label="股數" value={int(row.shares)} />
-                  <Cell label="均價" value={num(row.avgCost)} />
+                  <Cell label="成本均價" value={num(row.avgCost)} />
                   <Cell label="市值" value={money(row.value)} />
                   <Cell
                     label="損益"
