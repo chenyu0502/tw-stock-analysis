@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { ChevronDown, ChevronUp, Trash2, Wand2 } from 'lucide-react';
-import { loadHistory } from '../store/marketSlice.js';
+import { loadHistory, loadInstitutionalHistory } from '../store/marketSlice.js';
 import { crossState, kd, macd, rsi, bias, atr, optimizeMaPeriods } from '../lib/indicators.js';
 import { num, pct, int, changeColor, stateColor } from '../lib/format.js';
 import PriceChart from './PriceChart.jsx';
+import InstitutionalChart from './InstitutionalChart.jsx';
+
+/** 法人買賣超歷史的預設查詢天數。 */
+const CHIP_DAYS = 30;
 
 /**
  * 單一標的的卡片。收合時顯示報價與訊號摘要，展開後顯示走勢圖與完整指標。
@@ -27,13 +31,15 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
   const valuation = useSelector((s) => s.market.valuation[item.code]);
   const margin = useSelector((s) => s.market.margin[item.code]);
   const institutional = useSelector((s) => s.market.institutional[item.code]);
+  const chipHistory = useSelector((s) => s.market.institutionalHistory[item.code]);
 
   // 展開時才抓歷史資料，避免清單一次載入數十檔造成不必要的流量。
+  // 法人歷史走 FinMind，免費方案每小時 600 次，逐檔延後載入才不會浪費額度。
   useEffect(() => {
-    if (expanded && !history) {
-      dispatch(loadHistory({ code: item.code, range: '1y' }));
-    }
-  }, [expanded, history, item.code, dispatch]);
+    if (!expanded) return;
+    if (!history) dispatch(loadHistory({ code: item.code, range: '1y' }));
+    if (!chipHistory) dispatch(loadInstitutionalHistory({ code: item.code, days: CHIP_DAYS }));
+  }, [expanded, history, chipHistory, item.code, dispatch]);
 
   const candles = history?.candles ?? [];
 
@@ -237,6 +243,20 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
                   )}
                 </Section>
               )}
+
+              {/* 法人買賣超走勢 */}
+              <div>
+                <h4 className="mb-2 text-xs font-medium text-slate-400">三大法人買賣超走勢</h4>
+                {!chipHistory ? (
+                  <div className="py-6 text-center text-sm text-slate-500">載入法人資料中…</div>
+                ) : chipHistory.available === false ? (
+                  <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-xs text-slate-500">
+                    {chipHistory.reason ?? '無法取得法人歷史資料'}
+                  </div>
+                ) : (
+                  <InstitutionalChart series={chipHistory.series} />
+                )}
+              </div>
 
               <p className="text-[11px] text-slate-600">
                 以上為技術面與公開資訊整理，非投資建議。

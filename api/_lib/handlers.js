@@ -483,7 +483,7 @@ async function loadOtcInstitutional() {
  * GET /api/institutional?codes=2330[&days=30]
  *
  * 預設回傳當日買賣超（免費、免 token）。
- * 帶入 days 且伺服器設有 FINMIND_TOKEN 時，改抓 FinMind 取得歷史連買連賣序列。
+ * 帶入 days 時改抓 FinMind 取得歷史序列，需伺服器設有 FINMIND_TOKEN。
  * 單位為張。
  */
 export async function institutionalHandler(query, env = {}) {
@@ -493,7 +493,27 @@ export async function institutionalHandler(query, env = {}) {
     .filter(Boolean);
   const days = Number(query.days ?? 0);
 
-  if (days > 0 && env.FINMIND_TOKEN && codes.length === 1) {
+  if (days > 0) {
+    if (codes.length !== 1) {
+      return { status: 400, body: { error: '查詢歷史序列時只能帶入單一代號' } };
+    }
+    if (days > 365) {
+      return { status: 400, body: { error: 'days 上限為 365' } };
+    }
+    // 未設定 token 時回傳明確的不可用狀態，而不是悄悄退回當日資料。
+    // 兩者的資料結構不同，混在一起會讓前端難以判斷拿到的究竟是什麼。
+    if (!env.FINMIND_TOKEN) {
+      return {
+        status: 200,
+        body: {
+          source: 'none',
+          code: codes[0],
+          available: false,
+          reason: '伺服器未設定 FINMIND_TOKEN，無法取得法人歷史資料',
+          series: [],
+        },
+      };
+    }
     return institutionalHistory(codes[0], days, env.FINMIND_TOKEN);
   }
 
@@ -523,40 +543,48 @@ export async function institutionalHandler(query, env = {}) {
  * @param {string} token
  */
 async function institutionalHistory(code, days, token) {
-  const start = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 10);
-  const url =
-    `${FINMIND}?dataset=TaiwanStockInstitutionalInvestorsBuySell` +
-    `&data_id=${encodeURIComponent(code)}&start_date=${start}`;
+  return withCache(`institutional:history:${code}:${days}`, TTL.DAILY, async () => {
+    const start = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 10);
+    const url =
+      `${FINMIND}?dataset=TaiwanStockInstitutionalInvestorsBuySell` +
+      `&data_id=${encodeURIComponent(code)}&start_date=${start}`;
 
-  // FinMind v4 以 Authorization 標頭認證。舊版可用的 token 查詢參數已不是官方寫法，
-  // 且把金鑰放在網址會被各層代理與日誌記錄下來，不應使用。
-  const json = await fetchJson(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (json?.status !== 200) {
-    return { status: 502, body: { error: `FinMind 回應：${json?.msg ?? '未知錯誤'}` } };
-  }
+    // FinMind v4 以 Authorization 標頭認證。舊版可用的 token 查詢參數已不是官方寫法，
+    // 且把金鑰放在網址會被各層代理與日誌記錄下來，不應使用。
+    const json = await fetchJson(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (json?.status !== 200) {
+      return { status: 502, body: { error: `FinMind 回應：${json?.msg ?? '未知錯誤'}` } };
+    }
 
-  // FinMind 是每個法人別一列，需依日期彙整成單列。
-  const byDate = {};
-  for (const row of json.data ?? []) {
-    const d = row.date;
-    byDate[d] ??= { date: d, foreign: 0, trust: 0, dealer: 0, total: 0 };
-    const net = ((row.buy ?? 0) - (row.sell ?? 0)) / SHARES_PER_LOT;
-    const type = String(row.name ?? '');
-    if (/Foreign/i.test(type)) byDate[d].foreign += net;
-    else if (/Investment_Trust/i.test(type)) byDate[d].trust += net;
-    else if (/Dealer/i.test(type)) byDate[d].dealer += net;
-    byDate[d].total += net;
-  }
+    // FinMind 每個法人別各一列，需依日期彙整成單列。
+    //
+    // 實測回傳的法人別共五種：Foreign_Investor、Foreign_Dealer_Self、
+    // Investment_Trust、Dealer_self、Dealer_Hedging。
+    // 判斷順序不能調換：Foreign_Dealer_Self 同時符合外資與自營商兩種樣式，
+    // 市場慣稱的「外資」包含外資自營商，因此必須先判定外資。
+    const byDate = {};
+    for (const row of json.data ?? []) {
+      const d = row.date;
+      byDate[d] ??= { date: d, foreign: 0, trust: 0, dealer: 0, total: 0 };
+      const net = ((row.buy ?? 0) - (row.sell ?? 0)) / SHARES_PER_LOT;
+      const type = String(row.name ?? '');
+      if (/Foreign/i.test(type)) byDate[d].foreign += net;
+      else if (/Investment_Trust/i.test(type)) byDate[d].trust += net;
+      else if (/Dealer/i.test(type)) byDate[d].dealer += net;
+      byDate[d].total += net;
+    }
 
-  return {
-    status: 200,
-    body: {
-      source: 'FinMind',
-      code,
-      series: Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date)),
-      fetchedAt: new Date().toISOString(),
-    },
-  };
+    return {
+      status: 200,
+      body: {
+        source: 'FinMind',
+        code,
+        available: true,
+        series: Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date)),
+        fetchedAt: new Date().toISOString(),
+      },
+    };
+  });
 }
 
 /* ------------------------------------------------------------------ */

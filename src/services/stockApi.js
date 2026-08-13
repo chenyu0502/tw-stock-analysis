@@ -57,12 +57,24 @@ export function fetchMargin(codes) {
 }
 
 /**
- * 取得三大法人買賣超。
+ * 取得多檔的當日三大法人買賣超。
  * @param {string[]} codes
- * @param {number} [days] 帶入天數且伺服器設有 FinMind token 時回傳歷史序列
  */
-export function fetchInstitutional(codes, days) {
-  return callApi('institutional', { codes: codes.join(','), days });
+export function fetchInstitutional(codes) {
+  return callApi('institutional', { codes: codes.join(',') });
+}
+
+/**
+ * 取得單檔的三大法人買賣超歷史序列。
+ *
+ * 需要伺服器端設有 FINMIND_TOKEN。未設定時回傳 available 為 false，
+ * 呼叫端應據此顯示提示，而不是當成沒有資料。
+ * @param {string} code
+ * @param {number} [days=30]
+ * @returns {Promise<{ available: boolean, series: object[], reason?: string }>}
+ */
+export function fetchInstitutionalHistory(code, days = 30) {
+  return callApi('institutional', { codes: code, days });
 }
 
 /**

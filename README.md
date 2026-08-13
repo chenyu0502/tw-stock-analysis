@@ -6,7 +6,7 @@
 
 | 分頁 | 狀態 | 內容 |
 |---|---|---|
-| 分析 | 已完成 | 標的清單管理、K 線與雙均線圖、技術指標、估值、籌碼面、均線參數回測最佳化 |
+| 分析 | 已完成 | 標的清單管理、K 線與雙均線圖、技術指標、估值、籌碼面、三大法人買賣超走勢、均線參數回測最佳化 |
 | 持股 | 已完成 | 交易紀錄、加權平均成本、交易成本試算、市值與未實現損益、資金水位、集中度風險警示 |
 | 績效 | 已完成 | 今日逐檔損益、每日損益月曆、每月損益走勢、歷年績效總覽、已實現損益 |
 | AI | 待實作 | 第一版不接 AI |
@@ -37,7 +37,7 @@ npm run dev
 | 變數 | 必要 | 說明 |
 |---|---|---|
 | `VITE_FIREBASE_*` | 否 | Firebase 網頁設定。未填時以純本機模式運作，資料只存 localStorage |
-| `FINMIND_TOKEN` | 否 | FinMind API token。僅用於三大法人的歷史序列查詢，當日買賣超不需要 |
+| `FINMIND_TOKEN` | 否 | FinMind API token，用於三大法人買賣超走勢。未設定時該區塊會顯示提示，其餘功能不受影響 |
 
 `VITE_` 前綴的變數會打包進前端，屬公開資訊；`FINMIND_TOKEN` 沒有前綴，只在伺服器端使用，不會外洩。
 
@@ -61,6 +61,7 @@ api/                     資料代理層
 src/
   lib/indicators.js      技術指標與回測
   lib/performance.js     權益曲線與績效計算
+  lib/chips.js           籌碼面（連續買賣超、區間累計）
   lib/fees.js            台股交易成本
   lib/firebase.js        登入與雲端同步
   lib/format.js          顯示格式化（含台股紅漲綠跌慣例）
@@ -91,8 +92,9 @@ vite-plugin-local-api.js 開發模式的 API 中介層
 | 歷史 K 線 | Yahoo Finance | `query1.finance.yahoo.com/v8/finance/chart` |
 | 上市融資融券 | 證交所 OpenAPI | `/v1/exchangeReport/MI_MARGN` |
 | 上櫃融資融券 | 櫃買中心 OpenAPI | `/v1/tpex_mainboard_margin_balance` |
-| 上市三大法人 | 證交所官網 | `/rwd/zh/fund/T86` |
-| 上櫃三大法人 | 櫃買中心 OpenAPI | `/v1/tpex_3insti_daily_trading` |
+| 上市三大法人（當日） | 證交所官網 | `/rwd/zh/fund/T86` |
+| 上櫃三大法人（當日） | 櫃買中心 OpenAPI | `/v1/tpex_3insti_daily_trading` |
+| 三大法人歷史序列 | FinMind | `TaiwanStockInstitutionalInvestorsBuySell` |
 | 上市估值 | 證交所 OpenAPI | `/v1/exchangeReport/BWIBBU_ALL` |
 | 上櫃估值 | 櫃買中心 OpenAPI | `/v1/tpex_mainboard_peratio_analysis` |
 | 代號對照 | 兩者合併 | `STOCK_DAY_ALL` 與 `tpex_mainboard_quotes` |
@@ -150,6 +152,21 @@ Yahoo 成交量為股），全部在 `handlers.js` 換算完畢，前端不需�
 
 已實現損益採平均成本法，並把手續費與證交稅計入。費率預設券商手續費 0.1425% 打六折、
 最低 20 元，一般股票證交稅 0.3%，ETF 證交稅 0.1%，見 `src/lib/fees.js`。
+
+## 籌碼面
+
+`src/lib/chips.js` 由 FinMind 的每日買賣超序列計算連續買賣天數與區間累計。
+
+連續天數的判定規則：從最近一個交易日往回數，方向相同才續計，**買賣超為零的當天視為中斷**。
+把「當天沒有動作」算進連買會虛增天數，那個數字用來判斷法人態度就失去意義。
+
+法人別的歸類需注意順序。FinMind 回傳五種法人別：`Foreign_Investor`、`Foreign_Dealer_Self`、
+`Investment_Trust`、`Dealer_self`、`Dealer_Hedging`。其中 `Foreign_Dealer_Self` 同時符合
+外資與自營商兩種樣式，而市場慣稱的「外資」包含外資自營商，因此必須先判定外資再判定自營商。
+
+圖表的三個法人別堆疊在同一根柱子上，`stackOffset="sign"` 讓正負值分別往上下堆疊而不互相抵銷，
+整根柱子的高度即為三大法人合計。顏色刻意避開紅綠：在台股語境紅綠代表漲跌，
+用在法人別上會被誤讀成「紅色那個是買超」，但柱狀圖的正負才是買賣方向。
 
 ## 部署
 
