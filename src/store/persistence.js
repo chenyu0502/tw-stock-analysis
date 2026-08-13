@@ -49,10 +49,12 @@ export function writeLocal(data) {
  * @returns {object}
  */
 export function mergePortfolio(local, cloud) {
-  if (!cloud) return local ?? { watchlist: [], holdings: [], cash: 0 };
+  const empty = { watchlist: [], holdings: [], transactions: [], cashFlows: [], cash: 0 };
+  if (!cloud) return local ?? empty;
   if (!local) return cloud;
 
-  const mergeList = (a = [], b = []) => {
+  /** 以 code 去重，同一檔兩邊都有時保留較新的一筆。 */
+  const mergeByCode = (a = [], b = []) => {
     const map = new Map();
     for (const item of [...a, ...b]) {
       const prev = map.get(item.code);
@@ -61,9 +63,21 @@ export function mergePortfolio(local, cloud) {
     return [...map.values()];
   };
 
+  /**
+   * 以 id 去重。交易與資金流水是逐筆事件，不能像持股那樣以 code 覆蓋，
+   * 否則同一檔的多筆買賣只會留下一筆。
+   */
+  const mergeById = (a = [], b = []) => {
+    const map = new Map();
+    for (const item of [...a, ...b]) map.set(item.id, item);
+    return [...map.values()].sort((x, y) => String(x.date).localeCompare(String(y.date)));
+  };
+
   return {
-    watchlist: mergeList(local.watchlist, cloud.watchlist),
-    holdings: mergeList(local.holdings, cloud.holdings),
+    watchlist: mergeByCode(local.watchlist, cloud.watchlist),
+    holdings: mergeByCode(local.holdings, cloud.holdings),
+    transactions: mergeById(local.transactions, cloud.transactions),
+    cashFlows: mergeById(local.cashFlows, cloud.cashFlows),
     cash: cloud.cash ?? local.cash ?? 0,
   };
 }

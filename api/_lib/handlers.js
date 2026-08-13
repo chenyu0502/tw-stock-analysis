@@ -40,6 +40,17 @@ function pickKey(row, pattern) {
 }
 
 /**
+ * 只接受正數，零與負數視為無效資料回傳 null。
+ *
+ * 報價欄位在盤前或無成交時可能是 "0.0000"，直接當成價格會算出離譜的漲跌幅。
+ * @param {number|null} value
+ * @returns {number|null}
+ */
+function positiveOrNull(value) {
+  return value !== null && value > 0 ? value : null;
+}
+
+/**
  * 產生今日往前數天的日期字串（YYYYMMDD），用於逐日回溯尋找最近交易日。
  * @param {number} count
  * @returns {string[]}
@@ -150,10 +161,11 @@ export async function quoteHandler(query) {
       const code = row.c;
       if (!code) continue;
 
-      const prevClose = toNumber(row.y);
-      // z 為最新成交價，無成交時為 "-"，退而使用最佳委買價，再退用昨收。
-      const bestBid = toNumber(String(row.b ?? '').split('_')[0]);
-      const price = toNumber(row.z) ?? bestBid ?? prevClose;
+      const prevClose = positiveOrNull(toNumber(row.y));
+      // z 為最新成交價。無成交時 MIS 可能回傳 "-"，也可能回傳 "0.0000"，
+      // 後者若直接採用會算出負百分之百的跌幅，因此零與負值一律視為無效。
+      const bestBid = positiveOrNull(toNumber(String(row.b ?? '').split('_')[0]));
+      const price = positiveOrNull(toNumber(row.z)) ?? bestBid ?? prevClose;
       const change = price !== null && prevClose !== null ? price - prevClose : null;
 
       quotes[code] = {

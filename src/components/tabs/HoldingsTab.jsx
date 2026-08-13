@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Plus, AlertTriangle } from 'lucide-react';
-import { upsertHolding, removeHolding, updateHolding, setCash } from '../../store/portfolioSlice.js';
+import { Plus, AlertTriangle, Banknote } from 'lucide-react';
+import {
+  recordTrade,
+  removeHolding,
+  updateHolding,
+  recordCashFlow,
+  setCash,
+  today,
+} from '../../store/portfolioSlice.js';
 import { loadQuotes, loadDailyStats } from '../../store/marketSlice.js';
+import { tradeCost } from '../../lib/fees.js';
 import { money, pct, num, int, changeColor } from '../../lib/format.js';
 import StockCard from '../StockCard.jsx';
 
@@ -17,7 +25,8 @@ export default function HoldingsTab() {
   const { holdings, cash } = useSelector((s) => s.portfolio);
   const quotes = useSelector((s) => s.market.quotes);
 
-  const [form, setForm] = useState({ code: '', shares: '', price: '' });
+  const [form, setForm] = useState({ code: '', shares: '', price: '', date: today() });
+  const [flowAmount, setFlowAmount] = useState('');
   const [message, setMessage] = useState('');
 
   const codesKey = holdings.map((h) => h.code).join(',');
@@ -75,7 +84,15 @@ export default function HoldingsTab() {
     [rows, summary.totalValue]
   );
 
-  function handleAdd(e) {
+  // 即時試算這筆交易的成本，讓使用者送出前就看到手續費與證交稅。
+  const estimatedCost = useMemo(() => {
+    const shares = Number(form.shares);
+    const price = Number(form.price);
+    if (!form.code || !Number.isFinite(shares) || !Number.isFinite(price) || price <= 0) return null;
+    return tradeCost({ code: form.code, shares, price });
+  }, [form]);
+
+  function handleTrade(e) {
     e.preventDefault();
     const code = form.code.trim();
     const shares = Number(form.shares);
@@ -93,9 +110,24 @@ export default function HoldingsTab() {
       setMessage('價格需為正數');
       return;
     }
+    if (shares < 0 && !holdings.some((h) => h.code === code)) {
+      setMessage(`目前沒有 ${code} 的部位，無法賣出`);
+      return;
+    }
 
-    dispatch(upsertHolding({ code, shares, price }));
-    setForm({ code: '', shares: '', price: '' });
+    dispatch(recordTrade({ code, shares, price, date: form.date }));
+    setForm({ code: '', shares: '', price: '', date: today() });
+    setMessage('');
+  }
+
+  function handleCashFlow() {
+    const amount = Number(flowAmount);
+    if (!Number.isFinite(amount) || amount === 0) {
+      setMessage('入金金額需為非零數字，出金請填負數');
+      return;
+    }
+    dispatch(recordCashFlow({ amount }));
+    setFlowAmount('');
     setMessage('');
   }
 
@@ -111,20 +143,45 @@ export default function HoldingsTab() {
           sub={pct(summary.profitPercent, 2, true)}
           tone={summary.profit}
         />
-        <SummaryCard label="總淨值" value={money(summary.netWorth)} sub={`持股水位 ${pct(summary.exposure, 1)}`} />
+        <SummaryCard
+          label="總淨值"
+          value={money(summary.netWorth)}
+          sub={`持股水位 ${pct(summary.exposure, 1)}`}
+        />
       </div>
 
-      {/* 現金 */}
-      <label className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/50 p-3 text-sm">
-        <span className="text-slate-400">帳上現金</span>
-        <input
-          type="number"
-          value={cash || ''}
-          onChange={(e) => dispatch(setCash(e.target.value))}
-          placeholder="0"
-          className="tabular flex-1 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-right"
-        />
-      </label>
+      {/* 現金與資金進出 */}
+      <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-3">
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="text-slate-400">帳上現金</span>
+          <input
+            type="number"
+            value={cash || ''}
+            onChange={(e) => dispatch(setCash(e.target.value))}
+            placeholder="0"
+            className="tabular min-w-32 flex-1 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-right"
+          />
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            type="number"
+            value={flowAmount}
+            onChange={(e) => setFlowAmount(e.target.value)}
+            placeholder="入金金額（出金填負數）"
+            className="tabular min-w-40 flex-1 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm placeholder:text-slate-600"
+          />
+          <button
+            type="button"
+            onClick={handleCashFlow}
+            className="flex items-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-300 transition hover:border-slate-500"
+          >
+            <Banknote size={14} /> 記錄資金進出
+          </button>
+        </div>
+        <p className="mt-1.5 text-[11px] text-slate-600">
+          資金進出會記入流水並調整現金，績效頁計算報酬率時會把入金排除在獲利之外。
+        </p>
+      </div>
 
       {concentrated.length > 0 && (
         <div className="flex items-start gap-2 rounded-xl border border-amber-800/60 bg-amber-950/30 p-3 text-xs text-amber-300">
@@ -139,36 +196,54 @@ export default function HoldingsTab() {
         </div>
       )}
 
-      {/* 新增部位 */}
-      <form onSubmit={handleAdd} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <input
-          value={form.code}
-          onChange={(e) => setForm({ ...form, code: e.target.value })}
-          placeholder="代號"
-          inputMode="numeric"
-          className="tabular rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
-        />
-        <input
-          value={form.shares}
-          onChange={(e) => setForm({ ...form, shares: e.target.value })}
-          placeholder="股數（賣出填負數）"
-          type="number"
-          className="tabular rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
-        />
-        <input
-          value={form.price}
-          onChange={(e) => setForm({ ...form, price: e.target.value })}
-          placeholder="成交價"
-          type="number"
-          step="0.01"
-          className="tabular rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
-        />
-        <button
-          type="submit"
-          className="flex items-center justify-center gap-1.5 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-500"
-        >
-          <Plus size={15} /> 記錄交易
-        </button>
+      {/* 記錄交易 */}
+      <form onSubmit={handleTrade} className="space-y-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <input
+            value={form.code}
+            onChange={(e) => setForm({ ...form, code: e.target.value })}
+            placeholder="代號"
+            inputMode="numeric"
+            className="tabular rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
+          />
+          <input
+            value={form.shares}
+            onChange={(e) => setForm({ ...form, shares: e.target.value })}
+            placeholder="股數（賣出填負數）"
+            type="number"
+            className="tabular rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
+          />
+          <input
+            value={form.price}
+            onChange={(e) => setForm({ ...form, price: e.target.value })}
+            placeholder="成交價"
+            type="number"
+            step="0.01"
+            className="tabular rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
+          />
+          <input
+            value={form.date}
+            onChange={(e) => setForm({ ...form, date: e.target.value })}
+            type="date"
+            className="tabular rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm focus:border-sky-600 focus:outline-none"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="submit"
+            className="flex items-center gap-1.5 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-500"
+          >
+            <Plus size={15} /> 記錄交易
+          </button>
+          {estimatedCost && (
+            <span className="tabular text-xs text-slate-500">
+              預估成本 手續費 {money(estimatedCost.brokerFee)}
+              {estimatedCost.tax > 0 && ` ＋ 證交稅 ${money(estimatedCost.tax)}`}
+              ，合計 {money(estimatedCost.total)}
+            </span>
+          )}
+        </div>
       </form>
 
       {message && <p className="text-xs text-amber-500">{message}</p>}
@@ -190,7 +265,12 @@ export default function HoldingsTab() {
                   <Cell label="股數" value={int(row.shares)} />
                   <Cell label="均價" value={num(row.avgCost)} />
                   <Cell label="市值" value={money(row.value)} />
-                  <Cell label="損益" value={money(row.profit)} sub={pct(row.profitPercent, 2, true)} tone={row.profit} />
+                  <Cell
+                    label="損益"
+                    value={money(row.profit)}
+                    sub={pct(row.profitPercent, 2, true)}
+                    tone={row.profit}
+                  />
                 </div>
               }
             />
@@ -205,10 +285,18 @@ function SummaryCard({ label, value, sub, tone }) {
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-3">
       <div className="text-[11px] text-slate-500">{label}</div>
-      <div className={`tabular mt-1 text-base font-semibold ${tone === undefined ? 'text-slate-100' : changeColor(tone)}`}>
+      <div
+        className={`tabular mt-1 text-base font-semibold ${
+          tone === undefined ? 'text-slate-100' : changeColor(tone)
+        }`}
+      >
         {value}
       </div>
-      {sub && <div className={`tabular text-[11px] ${tone === undefined ? 'text-slate-500' : changeColor(tone)}`}>{sub}</div>}
+      {sub && (
+        <div className={`tabular text-[11px] ${tone === undefined ? 'text-slate-500' : changeColor(tone)}`}>
+          {sub}
+        </div>
+      )}
     </div>
   );
 }
@@ -218,7 +306,9 @@ function Cell({ label, value, sub, tone }) {
     <div>
       <div className="text-[10px] text-slate-500">{label}</div>
       <div className={tone === undefined ? 'text-slate-200' : changeColor(tone)}>{value}</div>
-      {sub && <div className={`text-[10px] ${tone === undefined ? 'text-slate-500' : changeColor(tone)}`}>{sub}</div>}
+      {sub && (
+        <div className={`text-[10px] ${tone === undefined ? 'text-slate-500' : changeColor(tone)}`}>{sub}</div>
+      )}
     </div>
   );
 }

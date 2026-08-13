@@ -1,11 +1,10 @@
-import { LineChart, Wallet, TrendingUp, Coins, Sparkles } from 'lucide-react';
+import { LineChart, Wallet, TrendingUp, Sparkles } from 'lucide-react';
 
 /** 底部導覽的分頁定義。 */
 export const TABS = [
   { id: 'analysis', label: '分析', Icon: LineChart },
   { id: 'holdings', label: '持股', Icon: Wallet },
   { id: 'performance', label: '績效', Icon: TrendingUp },
-  { id: 'capital', label: '資金', Icon: Coins },
   { id: 'ai', label: 'AI', Icon: Sparkles },
 ];
 
