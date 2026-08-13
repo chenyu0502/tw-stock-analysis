@@ -526,9 +526,11 @@ async function institutionalHistory(code, days, token) {
   const start = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 10);
   const url =
     `${FINMIND}?dataset=TaiwanStockInstitutionalInvestorsBuySell` +
-    `&data_id=${encodeURIComponent(code)}&start_date=${start}&token=${encodeURIComponent(token)}`;
+    `&data_id=${encodeURIComponent(code)}&start_date=${start}`;
 
-  const json = await fetchJson(url);
+  // FinMind v4 以 Authorization 標頭認證。舊版可用的 token 查詢參數已不是官方寫法，
+  // 且把金鑰放在網址會被各層代理與日誌記錄下來，不應使用。
+  const json = await fetchJson(url, { headers: { Authorization: `Bearer ${token}` } });
   if (json?.status !== 200) {
     return { status: 502, body: { error: `FinMind 回應：${json?.msg ?? '未知錯誤'}` } };
   }
