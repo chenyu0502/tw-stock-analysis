@@ -47,6 +47,28 @@ export async function withCache(key, ttlMs, producer) {
   return value;
 }
 
+/**
+ * 資料不完整時的快取包裝器。
+ *
+ * 多個上游合併而成的資料集（例如上市加上櫃）若有一邊取用失敗，
+ * 結果仍然「有值」，用一般的 withCache 會把這份殘缺資料鎖住整個 TTL，
+ * 使用者在那段期間只會看到某個市場的個股永遠查無資料，而且沒有任何錯誤訊息。
+ *
+ * 因此把完整與不完整分開計時：不完整的結果只快取很短的時間，讓下一次請求重試。
+ *
+ * @param {string} key
+ * @param {number} ttlMs 資料完整時的存活時間
+ * @param {() => Promise<{ value: *, complete: boolean }>} producer
+ * @returns {Promise<*>}
+ */
+export async function withPartialCache(key, ttlMs, producer) {
+  const hit = cacheGet(key);
+  if (hit !== undefined) return hit;
+  const { value, complete } = await producer();
+  cacheSet(key, value, complete ? ttlMs : TTL.PARTIAL);
+  return value;
+}
+
 /** 常用 TTL 常數（毫秒）。 */
 export const TTL = {
   /** 盤中報價：15 秒 */
@@ -57,4 +79,6 @@ export const TTL = {
   DAILY: 30 * 60 * 1000,
   /** 股票代號名稱對照表：12 小時 */
   UNIVERSE: 12 * 60 * 60 * 1000,
+  /** 資料不完整時的重試間隔：1 分鐘 */
+  PARTIAL: 60 * 1000,
 };

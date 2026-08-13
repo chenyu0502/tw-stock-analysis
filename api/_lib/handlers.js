@@ -11,7 +11,7 @@
  */
 
 import { fetchJson, toNumber } from './http.js';
-import { withCache, TTL } from './cache.js';
+import { withCache, withPartialCache, TTL } from './cache.js';
 
 const TWSE_OPENAPI = 'https://openapi.twse.com.tw/v1';
 const TWSE_RWD = 'https://www.twse.com.tw/rwd/zh';
@@ -75,8 +75,10 @@ function recentDates(count) {
  * @returns {Promise<Record<string, { code: string, name: string, market: 'TSE'|'OTC' }>>}
  */
 async function loadUniverse() {
-  return withCache('universe', TTL.UNIVERSE, async () => {
+  return withPartialCache('universe', TTL.UNIVERSE, async () => {
     const map = {};
+    let listedOk = false;
+    let otcOk = false;
 
     // 上市：STOCK_DAY_ALL 每個交易日更新，含全部上市個股代號與名稱。
     try {
@@ -86,6 +88,7 @@ async function loadUniverse() {
         const name = String(row.Name ?? '').trim();
         if (code) map[code] = { code, name, market: 'TSE' };
       }
+      listedOk = true;
     } catch {
       // 上市清單取用失敗不應讓整個對照表失效，繼續嘗試上櫃。
     }
@@ -98,11 +101,12 @@ async function loadUniverse() {
         const name = String(row.CompanyName ?? '').trim();
         if (code && !map[code]) map[code] = { code, name, market: 'OTC' };
       }
+      otcOk = true;
     } catch {
       // 同上，允許只有上市資料。
     }
 
-    return map;
+    return { value: map, complete: listedOk && otcOk };
   });
 }
 
@@ -317,8 +321,10 @@ export async function marginHandler(query) {
     .map((c) => c.trim())
     .filter(Boolean);
 
-  const all = await withCache('margin:all', TTL.DAILY, async () => {
+  const all = await withPartialCache('margin:all', TTL.DAILY, async () => {
     const map = {};
+    let listedOk = false;
+    let otcOk = false;
 
     // 上市。證交所此端點使用中文欄位名稱。
     try {
@@ -339,6 +345,7 @@ export async function marginHandler(query) {
           toNumber(pickKey(row, /^融券前日餘額$/))
         );
       }
+      listedOk = true;
     } catch {
       // 單一市場失敗不影響另一市場。
     }
@@ -362,11 +369,12 @@ export async function marginHandler(query) {
           toNumber(row.ShortSaleBalancePreviousDay)
         );
       }
+      otcOk = true;
     } catch {
       // 同上。
     }
 
-    return map;
+    return { value: map, complete: listedOk && otcOk };
   });
 
   const picked = codes.length ? Object.fromEntries(codes.map((c) => [c, all[c] ?? null])) : all;
@@ -517,15 +525,22 @@ export async function institutionalHandler(query, env = {}) {
     return institutionalHistory(codes[0], days, env.FINMIND_TOKEN);
   }
 
-  const all = await withCache('institutional:all', TTL.DAILY, async () => {
+  const all = await withPartialCache('institutional:all', TTL.DAILY, async () => {
     // 兩個市場互不相依，並行取用；任一失敗不影響另一邊。
     const [listed, otc] = await Promise.allSettled([
       loadListedInstitutional(),
       loadOtcInstitutional(),
     ]);
+    // 上市走逐日回溯，全部日期都查無資料時會回空物件而不是拋錯，
+    // 因此完整性要看內容是否非空，只看 fulfilled 會漏判。
+    const listedOk = listed.status === 'fulfilled' && Object.keys(listed.value).length > 0;
+    const otcOk = otc.status === 'fulfilled' && Object.keys(otc.value).length > 0;
     return {
-      ...(otc.status === 'fulfilled' ? otc.value : {}),
-      ...(listed.status === 'fulfilled' ? listed.value : {}),
+      value: {
+        ...(otc.status === 'fulfilled' ? otc.value : {}),
+        ...(listed.status === 'fulfilled' ? listed.value : {}),
+      },
+      complete: listedOk && otcOk,
     };
   });
 
@@ -603,8 +618,10 @@ export async function valuationHandler(query) {
     .map((c) => c.trim())
     .filter(Boolean);
 
-  const all = await withCache('valuation:all', TTL.DAILY, async () => {
+  const all = await withPartialCache('valuation:all', TTL.DAILY, async () => {
     const map = {};
+    let listedOk = false;
+    let otcOk = false;
 
     try {
       const rows = await fetchJson(`${TWSE_OPENAPI}/exchangeReport/BWIBBU_ALL`);
@@ -621,6 +638,7 @@ export async function valuationHandler(query) {
           dividendPerShare: null,
         };
       }
+      listedOk = true;
     } catch {
       // 允許只有其中一個市場的資料。
     }
@@ -640,11 +658,12 @@ export async function valuationHandler(query) {
           dividendPerShare: toNumber(row.DividendPerShare),
         };
       }
+      otcOk = true;
     } catch {
       // 同上。
     }
 
-    return map;
+    return { value: map, complete: listedOk && otcOk };
   });
 
   const picked = codes.length ? Object.fromEntries(codes.map((c) => [c, all[c] ?? null])) : all;
