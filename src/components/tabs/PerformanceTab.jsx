@@ -11,6 +11,7 @@ import {
   CartesianGrid,
 } from 'recharts';
 import { loadHistory, loadQuotes } from '../../store/marketSlice.js';
+import { today as todayDate } from '../../store/portfolioSlice.js';
 import {
   normalizeTransactions,
   buildEquityCurve,
@@ -42,7 +43,18 @@ export default function PerformanceTab() {
     [holdings, transactions]
   );
   const codesKey = historyCodes.join(',');
-  const quoteCodesKey = holdings.map((h) => h.code).join(',');
+
+  // 報價要涵蓋目前持股「加上」今日成交過的標的。
+  // 今天全數賣出的標的已不在持股清單，若不抓它的報價就拿不到現價與昨收，
+  // 當日損益會整筆被當成無資料而漏算。
+  const quoteCodesKey = useMemo(() => {
+    const day = todayDate();
+    const codes = new Set(holdings.map((h) => h.code));
+    for (const t of transactions) {
+      if (t.date === day) codes.add(t.code);
+    }
+    return [...codes].join(',');
+  }, [holdings, transactions]);
 
   useEffect(() => {
     if (!codesKey) return;
@@ -73,7 +85,12 @@ export default function PerformanceTab() {
   const monthly = useMemo(() => aggregateByMonth(curve).slice(-MONTHS_SHOWN), [curve]);
   const yearly = useMemo(() => aggregateByYear(curve), [curve]);
   const realized = useMemo(() => realizedSummary(transactions), [transactions]);
-  const today = useMemo(() => todayPnl(holdings, quotes), [holdings, quotes]);
+  // 帶入交易紀錄與今日日期，當日損益才能把今天成交的部位按成交價計算，
+  // 而不是把整日漲跌套用在成交後的股數上。
+  const today = useMemo(
+    () => todayPnl(holdings, quotes, transactions, todayDate()),
+    [holdings, quotes, transactions]
+  );
 
   const latest = curve[curve.length - 1] ?? null;
   const currentMonth = latest?.date.slice(0, 7);
@@ -123,7 +140,10 @@ export default function PerformanceTab() {
       </div>
 
       {/* 今日逐檔明細 */}
-      <Panel title="今日各檔損益" note="盤中為即時試算，可與券商對照">
+      <Panel
+        title="今日各檔損益"
+        note="盤中為即時試算，可與券商對照。今日成交的部位以成交價計算價差，不套用整日漲跌"
+      >
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
@@ -140,7 +160,12 @@ export default function PerformanceTab() {
                 <tr key={item.code} className="border-t border-slate-800/60">
                   <td className="py-1.5">
                     <span className="text-slate-300">{item.code}</span>
-                    <span className="ml-1.5 text-slate-500">{item.name}</span>
+                    {item.name && <span className="ml-1.5 text-slate-500">{item.name}</span>}
+                    {item.tradedShares !== 0 && (
+                      <span className="ml-1.5 rounded bg-sky-950/60 px-1 py-0.5 text-[10px] text-sky-400">
+                        今日成交 {int(item.tradedShares)}
+                      </span>
+                    )}
                   </td>
                   <td className="py-1.5 text-right text-slate-400">{int(item.shares)}</td>
                   <td className={`py-1.5 text-right ${changeColor(item.change)}`}>{num(item.change)}</td>

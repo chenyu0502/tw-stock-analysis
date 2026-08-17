@@ -319,23 +319,69 @@ export function realizedSummary(transactions, range = {}) {
 /**
  * 以即時報價計算當日逐檔損益。
  *
- * 這是盤中即時試算，資料來源是報價的漲跌值，與權益曲線的收盤結算會有落差，
- * 收盤後兩者應趨於一致。
+ * 當日損益拆成兩段相加：
+ *   開盤前就持有的部位 × 當日漲跌
+ * ＋ 今日成交的部位 × （現價 − 成交價）− 手續費
+ *
+ * 不能直接用「目前股數 × 當日漲跌」。目前股數是成交後的結果，
+ * 那樣會把一整天的漲跌套用在只持有半天的部位上。
+ * 例如昨收 2380、今日以 2400 買進 1000 股、現價 2420，
+ * 實際只賺 20,000，用目前股數卻會算成 40,000。
+ *
+ * 迴圈涵蓋持股與今日交易的聯集，否則今天全數賣出的標的已不在持股清單中，
+ * 當天實際的損益會整筆消失。
+ *
+ * 這是盤中即時試算，與權益曲線的收盤結算會有落差，收盤後兩者應趨於一致。
  *
  * @param {object[]} holdings
  * @param {Record<string, object>} quotes
- * @returns {{ total:number, items:{code:string, shares:number, change:number|null, pnl:number|null}[] }}
+ * @param {object[]} [transactions] 交易紀錄，用於還原開盤前的持股數
+ * @param {string} [todayDate] 今日日期 YYYY-MM-DD
+ * @returns {{ total:number, items:object[] }}
  */
-export function todayPnl(holdings, quotes) {
-  const items = holdings.map((h) => {
-    const change = quotes[h.code]?.change ?? null;
+export function todayPnl(holdings, quotes, transactions = [], todayDate = null) {
+  const todayTx = todayDate ? transactions.filter((t) => t.date === todayDate) : [];
+
+  const holdingMap = new Map(holdings.map((h) => [h.code, h]));
+  const codes = [...new Set([...holdingMap.keys(), ...todayTx.map((t) => t.code)])];
+
+  const items = codes.map((code) => {
+    const quote = quotes[code];
+    const change = quote?.change ?? null;
+    const price = quote?.price ?? null;
+    const shares = holdingMap.get(code)?.shares ?? 0;
+
+    const trades = todayTx.filter((t) => t.code === code);
+    const tradedShares = trades.reduce((acc, t) => acc + t.shares, 0);
+    // 開盤前持股 = 目前股數 − 今日淨成交股數
+    const sharesAtOpen = shares - tradedShares;
+
+    let pnl = null;
+    if (change !== null) {
+      pnl = sharesAtOpen * change;
+      // 今日成交的部分，改以成交價為基準計算到現價的價差。
+      // 報價缺漏時無從計算這一段，整檔的當日損益就不給值，不用零充數。
+      if (trades.length > 0) {
+        if (price === null) {
+          pnl = null;
+        } else {
+          for (const t of trades) {
+            pnl += t.shares * (price - t.price) - (t.fee ?? 0);
+          }
+        }
+      }
+    }
+
     return {
-      code: h.code,
-      name: quotes[h.code]?.name ?? h.code,
-      shares: h.shares,
+      code,
+      // 名稱留空由顯示層決定如何呈現，回填代號會讓介面出現「64886488」。
+      name: quote?.name ?? '',
+      shares,
+      sharesAtOpen,
+      tradedShares,
       change,
-      changePercent: quotes[h.code]?.changePercent ?? null,
-      pnl: change === null ? null : change * h.shares,
+      changePercent: quote?.changePercent ?? null,
+      pnl,
     };
   });
 
