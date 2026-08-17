@@ -230,6 +230,29 @@ function buildChipBlock(chips) {
 }
 
 /**
+ * 把上游錯誤翻譯成使用者看得懂、且知道該怎麼處理的說明。
+ * @param {Error} err
+ * @returns {string}
+ */
+function describeError(err) {
+  const message = err?.message ?? '';
+
+  if (/50[023]|忙碌|overload|UNAVAILABLE/i.test(message)) {
+    return 'Gemini 服務目前忙碌，已自動重試仍未成功。請稍候再點一次分析。';
+  }
+  if (/429|quota|RESOURCE_EXHAUSTED/i.test(message)) {
+    return 'Gemini API 配額已用盡，請稍後再試，或到 Google AI Studio 檢視用量。';
+  }
+  if (/API key|API_KEY_INVALID|401|403|PERMISSION/i.test(message)) {
+    return 'Gemini 金鑰無效或權限不足，請確認 GEMINI_API_KEY 設定正確。';
+  }
+  if (/逾時|abort|timeout/i.test(message)) {
+    return 'Gemini 回應逾時，請稍候再試。';
+  }
+  return `AI 分析失敗：${message}`;
+}
+
+/**
  * POST /api/analyze
  *
  * 請求主體：{ code, name, price, levels, indicators, recent }
@@ -266,13 +289,20 @@ export async function analyzeHandler(input, env = {}) {
     return { status: 400, body: { error: '缺少 indicators 或 recent' } };
   }
 
-  const result = await generateJson({
-    apiKey: env.GEMINI_API_KEY,
-    model: env.GEMINI_MODEL,
-    systemInstruction: SYSTEM_INSTRUCTION,
-    prompt: buildPrompt(input),
-    schema: RESPONSE_SCHEMA,
-  });
+  let result;
+  try {
+    result = await generateJson({
+      apiKey: env.GEMINI_API_KEY,
+      model: env.GEMINI_MODEL,
+      systemInstruction: SYSTEM_INSTRUCTION,
+      prompt: buildPrompt(input),
+      schema: RESPONSE_SCHEMA,
+    });
+  } catch (err) {
+    // 上游的原始訊息（例如「上游回應 503」）對使用者沒有意義，
+    // 也看不出這是暫時性問題還是設定錯誤，翻譯成可行動的說明。
+    return { status: 200, noStore: true, body: { available: false, reason: describeError(err) } };
+  }
 
   return {
     status: 200,

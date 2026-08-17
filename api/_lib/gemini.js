@@ -81,7 +81,9 @@ async function callModel(target, { apiKey, systemInstruction, prompt, schema, te
       },
     }),
     timeoutMs: 45000,
-    retries: 1,
+    // 實測 Gemini 會間歇回傳 503（模型忙碌），單次重試不足以吸收。
+    // 三次重試加上退避後，總耗時最壞約 25 秒，仍在函式執行上限之內。
+    retries: 3,
   });
 
   const text = await res.text();

@@ -52,9 +52,10 @@ export async function fetchWithRetry(url, options = {}) {
       clearTimeout(timer);
       lastError = err;
     }
-    // 指數退避：200ms、400ms
+    // 指數退避：400ms、800ms、1600ms。
+    // 上游忙碌（503）時立刻重試多半還是被拒，等待一段時間成功率明顯較高。
     if (attempt < retries) {
-      await new Promise((resolve) => setTimeout(resolve, 200 * 2 ** attempt));
+      await new Promise((resolve) => setTimeout(resolve, 400 * 2 ** attempt));
     }
   }
   throw lastError ?? new Error('未知的上游錯誤');
