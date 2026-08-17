@@ -8,6 +8,17 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
+    // 台股損益存摺（另一個專案，共用同一個 Firebase 專案）：手機端唯讀。
+    // 資料由該專案本機的 serve.py 以服務帳戶寫入，服務帳戶會繞過安全規則，
+    // 因此這裡把前端寫入一律擋掉，手機端即使憑證外流也只能讀不能改。
+    // 這個區塊與本專案無關，但規則是整個 Firebase 專案共用的，
+    // 若從這個檔案重新發布時漏掉它，存摺的手機端會立刻讀不到資料。
+    match /handan/{docId} {
+      allow read: if request.auth != null
+                  && request.auth.uid == '3U816AjRimMRL7l4x79Z6l2mFtx2';
+      allow write: if false;
+    }
+
     // 未明確允許的路徑一律拒絕，避免日後新增集合時忘記設限。
     match /{document=**} {
       allow read, write: if false;
