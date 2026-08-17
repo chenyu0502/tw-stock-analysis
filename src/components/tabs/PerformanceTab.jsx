@@ -18,6 +18,7 @@ import {
   aggregateByMonth,
   aggregateByYear,
   realizedSummary,
+  positionSummary,
   todayPnl,
 } from '../../lib/performance.js';
 import { money, pct, num, int, changeColor } from '../../lib/format.js';
@@ -92,9 +93,25 @@ export default function PerformanceTab() {
     [holdings, quotes, transactions]
   );
 
+  // 成本法的部位彙總，與持股頁共用同一個函式，兩頁數字保證一致。
+  const position = useMemo(() => positionSummary(holdings, quotes, cash), [holdings, quotes, cash]);
+
   const latest = curve[curve.length - 1] ?? null;
   const currentMonth = latest?.date.slice(0, 7);
   const monthPnl = monthly.find((m) => m.month === currentMonth)?.pnl ?? 0;
+
+  // 總損益採成本法：已實現加未實現。
+  //
+  // 不用權益曲線的累積損益，因為那等於「今日市值 − 建倉登記日市值」，完全不看成本。
+  // 直接輸入既有部位時，登記日之前的獲利不存在於曲線中；若登記當天行情比現在高，
+  // 累積損益還會變成負數，與實際帳面獲利完全相反。
+  const totalPnl = realized.total + position.unrealized;
+
+  // 曲線的起算日。若晚於本月一日，當月損益只涵蓋部分月份，必須明示，
+  // 否則使用者會以為那是整個月的損益。
+  const curveStart = curve[0]?.date ?? null;
+  const monthStart = currentMonth ? `${currentMonth}-01` : null;
+  const monthPartial = Boolean(curveStart && monthStart && curveStart > monthStart);
 
   if (holdings.length === 0) {
     return (
@@ -129,15 +146,32 @@ export default function PerformanceTab() {
       {/* 摘要 */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Summary label="今日損益" value={money(today.total)} tone={today.total} sub="即時試算" />
-        <Summary label="當月損益" value={money(monthPnl)} tone={monthPnl} sub={currentMonth ?? ''} />
         <Summary
-          label="累積損益"
-          value={money(latest?.cumulativePnl ?? 0)}
-          tone={latest?.cumulativePnl}
-          sub="統計區間內"
+          label="當月損益"
+          value={money(monthPnl)}
+          tone={monthPnl}
+          sub={monthPartial ? `僅涵蓋 ${curveStart} 起` : (currentMonth ?? '')}
         />
-        <Summary label="總淨值" value={money(latest?.netWorth ?? cash)} sub={`含現金 ${money(cash)}`} />
+        <Summary
+          label="總損益"
+          value={money(totalPnl)}
+          tone={totalPnl}
+          sub={`已實現 ${money(realized.total)}　未實現 ${money(position.unrealized)}`}
+        />
+        <Summary
+          label="總淨值"
+          value={money(position.netWorth)}
+          sub={`市值 ${money(position.totalValue)}　現金 ${money(cash)}`}
+        />
       </div>
+
+      {monthPartial && (
+        <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-xs text-slate-400">
+          損益走勢的統計區間自 <span className="tabular">{curveStart}</span> 起算，
+          那是最早一筆交易紀錄或持股建倉日。此日之前的損益不在下方的月曆、月走勢與歷年績效中。
+          若要完整回溯，需補齊更早的交易紀錄。上方的「總損益」採成本法，不受此限制。
+        </div>
+      )}
 
       {/* 今日逐檔明細 */}
       <Panel
@@ -194,7 +228,15 @@ export default function PerformanceTab() {
       </Panel>
 
       {/* 每月損益走勢 */}
-      <Panel title={`每月損益走勢（近 ${MONTHS_SHOWN} 個月）`}>
+      <Panel
+        title={`每月損益走勢（近 ${MONTHS_SHOWN} 個月）`}
+        note={
+          curveStart
+            ? `以每日淨值變動加總，扣除資金進出。統計自 ${curveStart} 起，` +
+              `區間內累計 ${money(latest?.cumulativePnl ?? 0)}`
+            : '以每日淨值變動加總，扣除資金進出'
+        }
+      >
         {monthly.length === 0 ? (
           <div className="py-8 text-center text-sm text-slate-500">資料不足</div>
         ) : (

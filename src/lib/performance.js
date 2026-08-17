@@ -280,6 +280,61 @@ export function dailyPnlOfMonth(curve, month) {
 }
 
 /* ------------------------------------------------------------------ */
+/* 部位彙總                                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 以成本法彙總目前部位。
+ *
+ * 持股頁與績效頁都呼叫這個函式，兩頁的總市值、未實現損益與總淨值因此不可能不一致。
+ * 先前兩頁各自計算，績效頁用權益曲線的收盤價、持股頁用即時報價，
+ * 盤中會顯示不同的總淨值。
+ *
+ * 取不到報價的部位以成本計入市值，未實現損益視為零。
+ * 若改成排除該部位，總市值會在報價載入過程中大幅跳動。
+ *
+ * @param {object[]} holdings
+ * @param {Record<string, object>} quotes
+ * @param {number} [cash=0]
+ * @returns {{
+ *   totalCost:number, totalValue:number, unrealized:number,
+ *   unrealizedPercent:number|null, netWorth:number, exposure:number|null,
+ *   items:object[]
+ * }}
+ */
+export function positionSummary(holdings, quotes, cash = 0) {
+  const items = holdings.map((h) => {
+    const price = quotes[h.code]?.price ?? null;
+    const cost = h.avgCost * h.shares;
+    const value = price === null ? null : price * h.shares;
+    const profit = value === null ? null : value - cost;
+    return {
+      ...h,
+      price,
+      cost,
+      value,
+      profit,
+      profitPercent: profit === null || cost === 0 ? null : (profit / cost) * 100,
+    };
+  });
+
+  const totalCost = items.reduce((acc, r) => acc + r.cost, 0);
+  const totalValue = items.reduce((acc, r) => acc + (r.value ?? r.cost), 0);
+  const unrealized = totalValue - totalCost;
+  const netWorth = totalValue + cash;
+
+  return {
+    totalCost,
+    totalValue,
+    unrealized,
+    unrealizedPercent: totalCost === 0 ? null : (unrealized / totalCost) * 100,
+    netWorth,
+    exposure: netWorth === 0 ? null : (totalValue / netWorth) * 100,
+    items,
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* 已實現損益                                                          */
 /* ------------------------------------------------------------------ */
 

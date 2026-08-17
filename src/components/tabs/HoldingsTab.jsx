@@ -11,6 +11,7 @@ import {
 } from '../../store/portfolioSlice.js';
 import { loadQuotes, loadDailyStats } from '../../store/marketSlice.js';
 import { tradeCost } from '../../lib/fees.js';
+import { positionSummary } from '../../lib/performance.js';
 import { money, pct, num, int, changeColor } from '../../lib/format.js';
 import StockCard from '../StockCard.jsx';
 
@@ -38,40 +39,9 @@ export default function HoldingsTab() {
     dispatch(loadDailyStats(list));
   }, [codesKey, dispatch]);
 
-  const rows = useMemo(
-    () =>
-      holdings.map((h) => {
-        const price = quotes[h.code]?.price ?? null;
-        const cost = h.avgCost * h.shares;
-        const value = price === null ? null : price * h.shares;
-        const profit = value === null ? null : value - cost;
-        return {
-          ...h,
-          price,
-          cost,
-          value,
-          profit,
-          profitPercent: profit === null || cost === 0 ? null : (profit / cost) * 100,
-        };
-      }),
-    [holdings, quotes]
-  );
-
-  const summary = useMemo(() => {
-    const totalCost = rows.reduce((acc, r) => acc + r.cost, 0);
-    // 尚未取得報價的部位以成本計入市值，否則總市值會在載入過程中大幅低估。
-    const totalValue = rows.reduce((acc, r) => acc + (r.value ?? r.cost), 0);
-    const profit = totalValue - totalCost;
-    return {
-      totalCost,
-      totalValue,
-      profit,
-      profitPercent: totalCost === 0 ? null : (profit / totalCost) * 100,
-      netWorth: totalValue + cash,
-      // 持股佔淨值比例，用於判斷資金水位。
-      exposure: totalValue + cash === 0 ? null : (totalValue / (totalValue + cash)) * 100,
-    };
-  }, [rows, cash]);
+  // 與績效頁共用同一個彙總函式，兩頁的總市值、未實現損益與總淨值不會出現分歧。
+  const summary = useMemo(() => positionSummary(holdings, quotes, cash), [holdings, quotes, cash]);
+  const rows = summary.items;
 
   const concentrated = useMemo(
     () =>
@@ -144,9 +114,9 @@ export default function HoldingsTab() {
         <SummaryCard label="總投入成本" value={money(summary.totalCost)} />
         <SummaryCard
           label="未實現損益"
-          value={money(summary.profit)}
-          sub={pct(summary.profitPercent, 2, true)}
-          tone={summary.profit}
+          value={money(summary.unrealized)}
+          sub={pct(summary.unrealizedPercent, 2, true)}
+          tone={summary.unrealized}
         />
         <SummaryCard
           label="總淨值"
