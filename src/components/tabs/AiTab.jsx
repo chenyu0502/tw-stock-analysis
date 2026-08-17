@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Sparkles, AlertTriangle, RefreshCw } from 'lucide-react';
-import { loadHistory, loadDailyStats, loadInstitutionalHistory } from '../../store/marketSlice.js';
+import {
+  loadHistory,
+  loadQuotes,
+  loadDailyStats,
+  loadInstitutionalHistory,
+} from '../../store/marketSlice.js';
 import { buildAnalysisInput } from '../../lib/analysisInput.js';
 import { fetchAnalysis } from '../../services/stockApi.js';
 import { DEFAULT_MA } from '../../store/portfolioSlice.js';
@@ -45,14 +50,38 @@ export default function AiTab() {
 
   const selected = targets.find((t) => t.code === code);
 
-  // 中線判斷需要籌碼面、長線判斷需要估值，這些資料在其他分頁可能尚未載入過，
-  // 進入本頁時一併補齊，否則模型只能拿到技術面而無法完成三個週期的判讀。
+  /**
+   * 取得個股中文名稱。
+   *
+   * 報價、估值、融資融券、法人四個來源都帶有名稱，依序取用。
+   * 只靠報價的話，遇到報價尚未載入或該檔當日無報價時就只剩代號，難以辨識。
+   */
+  const nameOf = useMemo(() => {
+    return (target) =>
+      quotes[target]?.name ||
+      valuationMap[target]?.name ||
+      marginMap[target]?.name ||
+      institutionalMap[target]?.name ||
+      '';
+  }, [quotes, valuationMap, marginMap, institutionalMap]);
+
+  // 選單要顯示全部標的的名稱，因此報價與每日資料都對整份清單載入，
+  // 而不是只載入目前選中的那一檔。兩者都是單次批次請求，成本很低。
+  const allCodesKey = targets.map((t) => t.code).join(',');
+  useEffect(() => {
+    if (!allCodesKey) return;
+    const list = allCodesKey.split(',');
+    dispatch(loadQuotes(list));
+    dispatch(loadDailyStats(list));
+  }, [allCodesKey, dispatch]);
+
+  // 歷史 K 線與法人序列的資料量大，只對目前選中的標的載入。
+  // 中線判斷需要籌碼面，長線判斷需要估值，缺一模型就無法完成三個週期的判讀。
   useEffect(() => {
     if (!code) return;
     if (!history[code]) dispatch(loadHistory({ code, range: '1y' }));
-    if (!valuationMap[code] || !institutionalMap[code]) dispatch(loadDailyStats([code]));
     if (!chipHistoryMap[code]) dispatch(loadInstitutionalHistory({ code, days: 30 }));
-  }, [code, history, valuationMap, institutionalMap, chipHistoryMap, dispatch]);
+  }, [code, history, chipHistoryMap, dispatch]);
 
   // 切換標的時清掉上一檔的結果，避免看到別檔的分析卻以為是這檔的。
   useEffect(() => {
@@ -66,7 +95,7 @@ export default function AiTab() {
     if (!selected || candles.length === 0) return null;
     return buildAnalysisInput({
       code,
-      name: quotes[code]?.name,
+      name: nameOf(code),
       candles,
       maShort: selected.maShort ?? DEFAULT_MA.short,
       maLong: selected.maLong ?? DEFAULT_MA.long,
@@ -75,7 +104,7 @@ export default function AiTab() {
       chipSeries: chipHistoryMap[code]?.series,
       margin: marginMap[code],
     });
-  }, [selected, candles, code, quotes, valuationMap, institutionalMap, chipHistoryMap, marginMap]);
+  }, [selected, candles, code, nameOf, valuationMap, institutionalMap, chipHistoryMap, marginMap]);
 
   async function handleAnalyze() {
     if (!input) return;
@@ -112,7 +141,7 @@ export default function AiTab() {
         >
           {targets.map((t) => (
             <option key={t.code} value={t.code}>
-              {t.code} {quotes[t.code]?.name ?? ''}
+              {nameOf(t.code) ? `${t.code} ${nameOf(t.code)}` : t.code}
             </option>
           ))}
         </select>
