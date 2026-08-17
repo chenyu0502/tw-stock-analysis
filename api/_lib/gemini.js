@@ -11,7 +11,21 @@ import { fetchWithRetry } from './http.js';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 /** 預設模型。可用 GEMINI_MODEL 環境變數覆寫。 */
-export const DEFAULT_MODEL = 'gemini-2.5-flash';
+export const DEFAULT_MODEL = 'gemini-3.7-flash';
+
+/**
+ * 模型退役時的回退對象。
+ *
+ * Google 會讓舊模型「仍列在模型清單中，但對新使用者回傳 404」。
+ * 實測 gemini-2.5 系列就是這個狀態，光看清單無法察覺，直到實際呼叫才會失敗。
+ * 這個別名永遠指向當前的 flash 模型，用來把硬性中斷變成可用的降級。
+ */
+const FALLBACK_MODEL = 'gemini-flash-latest';
+
+/** 判斷錯誤是否為模型不可用，這種情況重試同一個模型沒有意義。 */
+function isModelUnavailable(message) {
+  return /no longer available|not found|is not supported/i.test(message);
+}
 
 /**
  * 呼叫 Gemini 產生結構化 JSON。
@@ -28,15 +42,26 @@ export const DEFAULT_MODEL = 'gemini-2.5-flash';
  * @param {number} [params.temperature=0.2] 分析任務需要穩定輸出，預設偏低
  * @returns {Promise<object>} 解析後的 JSON
  */
-export async function generateJson({
-  apiKey,
-  model,
-  systemInstruction,
-  prompt,
-  schema,
-  temperature = 0.2,
-}) {
-  const target = model || DEFAULT_MODEL;
+export async function generateJson(params) {
+  const target = params.model || DEFAULT_MODEL;
+  try {
+    return await callModel(target, params);
+  } catch (err) {
+    // 指定的模型已退役時改用永遠可用的別名，讓功能降級而不是整個中斷。
+    if (target !== FALLBACK_MODEL && isModelUnavailable(err.message)) {
+      return callModel(FALLBACK_MODEL, params);
+    }
+    throw err;
+  }
+}
+
+/**
+ * 對指定模型送出一次請求。
+ * @param {string} target 模型名稱
+ * @param {object} params 同 generateJson
+ * @returns {Promise<object>}
+ */
+async function callModel(target, { apiKey, systemInstruction, prompt, schema, temperature = 0.2 }) {
   const url = `${GEMINI_BASE}/models/${encodeURIComponent(target)}:generateContent`;
 
   const res = await fetchWithRetry(url, {
