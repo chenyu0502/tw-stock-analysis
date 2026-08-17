@@ -21,8 +21,32 @@ const SYSTEM_INSTRUCTION = `你是一位台股技術分析師，服務對象是�
 3. 型態判斷必須有依據，說明是根據哪些價格結構或指標得出。
    資料不足以判定明確型態時，直接說「型態未明」，不要硬套一個名稱。
 4. 語氣務實、分析導向。禁止使用「一定」「必漲」「保證」這類斷言。
-5. 不得提供投資建議或買賣指令，只做技術面的客觀描述。
-6. 禁止使用 emoji。`;
+5. 各時間週期的操作立場只能以技術面狀態描述（偏多、偏空、中性、觀望），
+   並說明依據與觀察條件。
+   **不得出現具體的買賣指令、目標價、停損價或部位配置比例**，
+   也不得使用「建議買進」「應該賣出」這類祈使語氣。行動由使用者自行決定。
+6. 判斷各週期立場時，請分別依據對應的資料：
+   短線看 KD、MACD、5 日乖離、量能比與最近的支撐壓力距離；
+   中線看 20 與 60 日均線關係、型態、法人近 5 日與近 20 日買賣超、融資融券；
+   長線看 120 日均線方向、現價在期間區間中的位置、本益比與股價淨值比與殖利率。
+   對應資料缺漏時，直接說明資料不足，不要用其他週期的資料硬推。
+7. 禁止使用 emoji。`;
+
+/**
+ * 單一時間週期的立場定義。
+ *
+ * stance 以列舉限定，介面才能據此上色。開放自由文字會出現「偏多但需觀察」
+ * 這類無法歸類的值，介面就無從呈現。
+ */
+const TIMEFRAME_SCHEMA = {
+  type: 'object',
+  properties: {
+    stance: { type: 'string', enum: ['偏多', '偏空', '中性', '觀望'] },
+    basis: { type: 'string', description: '判斷依據，說明用到哪些指標或價位，六十字以內' },
+    watch: { type: 'string', description: '關鍵觀察條件，需引用提供的價位或指標數值，四十字以內' },
+  },
+  required: ['stance', 'basis', 'watch'],
+};
 
 /** Gemini 的結構化輸出定義。用 responseSchema 保證格式，不靠提示詞約束。 */
 const RESPONSE_SCHEMA = {
@@ -62,6 +86,16 @@ const RESPONSE_SCHEMA = {
       },
       required: ['upside', 'downside'],
     },
+    timeframes: {
+      type: 'object',
+      description: '短中長線的技術面立場',
+      properties: {
+        short: { ...TIMEFRAME_SCHEMA, description: '短線，數日至兩週' },
+        medium: { ...TIMEFRAME_SCHEMA, description: '中線，數週至數月' },
+        long: { ...TIMEFRAME_SCHEMA, description: '長線，數月以上' },
+      },
+      required: ['short', 'medium', 'long'],
+    },
     summary: { type: 'string', description: '整體技術面結論，八十字以內' },
     risks: {
       type: 'array',
@@ -69,7 +103,7 @@ const RESPONSE_SCHEMA = {
       items: { type: 'string' },
     },
   },
-  required: ['pattern', 'levelNotes', 'keyLevel', 'scenarios', 'summary', 'risks'],
+  required: ['pattern', 'levelNotes', 'keyLevel', 'scenarios', 'timeframes', 'summary', 'risks'],
 };
 
 /**
@@ -91,7 +125,7 @@ function fmt(value) {
  * @returns {string}
  */
 function buildPrompt(input) {
-  const { code, name, price, levels, indicators, recent } = input;
+  const { code, name, price, levels, indicators, recent, valuation, chips } = input;
 
   const levelLines = [
     ...levels.resistances.map(
@@ -123,6 +157,7 @@ KD(9,3,3)：K ${fmt(indicators.k)} / D ${fmt(indicators.d)}
 RSI(14)：${fmt(indicators.rsi)}
 MACD：DIF ${fmt(indicators.dif)}，柱狀體 ${fmt(indicators.histogram)}
 均線：${indicators.maShort} 日 ${fmt(indicators.shortMa)}，${indicators.maLong} 日 ${fmt(indicators.longMa)}
+120 日均線：${fmt(indicators.ma120)}（近 20 日變化 ${fmt(indicators.ma120Slope)}%）
 均線狀態：${indicators.crossLabel}
 乖離率：5 日 ${fmt(indicators.bias5)}%，20 日 ${fmt(indicators.bias20)}%
 ATR(14)：${fmt(indicators.atr)}
@@ -130,11 +165,68 @@ ATR(14)：${fmt(indicators.atr)}
 【近期走勢】
 統計期間：${recent.periodDays} 個交易日
 期間最高 ${fmt(recent.high)}，期間最低 ${fmt(recent.low)}
+現價位於期間區間的 ${fmt(recent.pricePosition)}% 位置（0% 為期間最低，100% 為期間最高）
 近 20 日漲跌：${fmt(recent.change20)}%
 近 5 日均量與近 20 日均量比：${fmt(recent.volumeRatio)}
 
-請依上述資料判斷目前的價格型態，並解讀每個支撐壓力價位的意義。
-再次提醒：只能引用上方提供的價位數字，不可自行產生任何價格。`;
+${buildValuationBlock(valuation)}
+
+${buildChipBlock(chips)}
+
+請依上述資料完成以下工作：
+1. 判斷目前的價格型態。
+2. 解讀每個支撐壓力價位的意義。
+3. 分別給出短線、中線、長線的技術面立場，各自說明依據與觀察條件。
+
+再次提醒：只能引用上方提供的數字，不可自行產生任何價格。
+操作立場只描述技術面狀態，不得給出買賣指令、目標價或停損價。`;
+}
+
+/**
+ * 估值區塊。缺資料時明確寫出，讓模型知道長線判斷少了哪一塊，
+ * 而不是留白讓它自行想像。
+ * @param {object|null} valuation
+ * @returns {string}
+ */
+function buildValuationBlock(valuation) {
+  if (!valuation) return '【估值】無資料（長線判斷請說明缺少估值依據）';
+  return `【估值】
+本益比：${fmt(valuation.peRatio)}
+股價淨值比：${fmt(valuation.pbRatio)}
+現金殖利率：${fmt(valuation.dividendYield)}%`;
+}
+
+/**
+ * 籌碼面區塊，單位為張，正值為買超。
+ * @param {object|null} chips
+ * @returns {string}
+ */
+function buildChipBlock(chips) {
+  if (!chips) return '【籌碼面】無資料（中線判斷請說明缺少籌碼依據）';
+
+  const lines = ['【籌碼面】單位為張，正值為買超'];
+  if (chips.today) {
+    lines.push(
+      `當日：外資 ${fmt(chips.today.foreign)}，投信 ${fmt(chips.today.trust)}，自營商 ${fmt(chips.today.dealer)}`
+    );
+  }
+  if (chips.last5) {
+    lines.push(
+      `近 5 日累計：外資 ${fmt(chips.last5.foreign)}，投信 ${fmt(chips.last5.trust)}，自營商 ${fmt(chips.last5.dealer)}`
+    );
+  }
+  if (chips.last20) {
+    lines.push(
+      `近 20 日累計：外資 ${fmt(chips.last20.foreign)}，投信 ${fmt(chips.last20.trust)}，自營商 ${fmt(chips.last20.dealer)}`
+    );
+  }
+  if (chips.margin) {
+    lines.push(
+      `融資增減 ${fmt(chips.margin.marginChange)}，融券增減 ${fmt(chips.margin.shortChange)}，` +
+        `券資比 ${fmt(chips.margin.shortMarginRatio)}%`
+    );
+  }
+  return lines.join('\n');
 }
 
 /**

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Sparkles, AlertTriangle, RefreshCw } from 'lucide-react';
-import { loadHistory } from '../../store/marketSlice.js';
+import { loadHistory, loadDailyStats, loadInstitutionalHistory } from '../../store/marketSlice.js';
 import { buildAnalysisInput } from '../../lib/analysisInput.js';
 import { fetchAnalysis } from '../../services/stockApi.js';
 import { DEFAULT_MA } from '../../store/portfolioSlice.js';
@@ -17,6 +17,10 @@ export default function AiTab() {
   const { watchlist, holdings } = useSelector((s) => s.portfolio);
   const history = useSelector((s) => s.market.history);
   const quotes = useSelector((s) => s.market.quotes);
+  const valuationMap = useSelector((s) => s.market.valuation);
+  const institutionalMap = useSelector((s) => s.market.institutional);
+  const marginMap = useSelector((s) => s.market.margin);
+  const chipHistoryMap = useSelector((s) => s.market.institutionalHistory);
 
   // 分析頁與持股頁的標的合併成一份清單，同一檔只出現一次。
   const targets = useMemo(() => {
@@ -41,9 +45,14 @@ export default function AiTab() {
 
   const selected = targets.find((t) => t.code === code);
 
+  // 中線判斷需要籌碼面、長線判斷需要估值，這些資料在其他分頁可能尚未載入過，
+  // 進入本頁時一併補齊，否則模型只能拿到技術面而無法完成三個週期的判讀。
   useEffect(() => {
-    if (code && !history[code]) dispatch(loadHistory({ code, range: '1y' }));
-  }, [code, history, dispatch]);
+    if (!code) return;
+    if (!history[code]) dispatch(loadHistory({ code, range: '1y' }));
+    if (!valuationMap[code] || !institutionalMap[code]) dispatch(loadDailyStats([code]));
+    if (!chipHistoryMap[code]) dispatch(loadInstitutionalHistory({ code, days: 30 }));
+  }, [code, history, valuationMap, institutionalMap, chipHistoryMap, dispatch]);
 
   // 切換標的時清掉上一檔的結果，避免看到別檔的分析卻以為是這檔的。
   useEffect(() => {
@@ -61,8 +70,12 @@ export default function AiTab() {
       candles,
       maShort: selected.maShort ?? DEFAULT_MA.short,
       maLong: selected.maLong ?? DEFAULT_MA.long,
+      valuation: valuationMap[code],
+      institutional: institutionalMap[code],
+      chipSeries: chipHistoryMap[code]?.series,
+      margin: marginMap[code],
     });
-  }, [selected, candles, code, quotes]);
+  }, [selected, candles, code, quotes, valuationMap, institutionalMap, chipHistoryMap, marginMap]);
 
   async function handleAnalyze() {
     if (!input) return;
@@ -169,6 +182,19 @@ export default function AiTab() {
             </div>
           </Panel>
 
+          {analysis.timeframes && (
+            <Panel
+              title="短中長線立場"
+              note="僅描述各週期的技術面狀態，不含買賣指令、目標價或停損價"
+            >
+              <div className="space-y-2">
+                <TimeframeRow label="短線" span="數日至兩週" data={analysis.timeframes.short} />
+                <TimeframeRow label="中線" span="數週至數月" data={analysis.timeframes.medium} />
+                <TimeframeRow label="長線" span="數月以上" data={analysis.timeframes.long} />
+              </div>
+            </Panel>
+          )}
+
           <Panel title="關鍵價位">
             <p className="text-sm leading-relaxed text-slate-300">{analysis.keyLevel}</p>
           </Panel>
@@ -211,6 +237,38 @@ function Panel({ title, note, children }) {
       {note && <p className="mb-3 mt-0.5 text-[11px] text-slate-600">{note}</p>}
       <div className={note ? '' : 'mt-3'}>{children}</div>
     </section>
+  );
+}
+
+/**
+ * 各週期立場的顏色。沿用台股紅漲綠跌的慣例，
+ * 偏多為紅、偏空為綠，避免與圖表的漲跌色衝突造成誤讀。
+ */
+const STANCE_STYLE = {
+  偏多: 'border-rose-500/40 bg-rose-500/10 text-rose-400',
+  偏空: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
+  中性: 'border-slate-600/50 bg-slate-700/20 text-slate-300',
+  觀望: 'border-amber-500/40 bg-amber-500/10 text-amber-400',
+};
+
+function TimeframeRow({ label, span, data }) {
+  if (!data) return null;
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium text-slate-200">{label}</span>
+        <span className="text-[11px] text-slate-600">{span}</span>
+        <span
+          className={`rounded border px-2 py-0.5 text-xs ${
+            STANCE_STYLE[data.stance] ?? STANCE_STYLE['中性']
+          }`}
+        >
+          {data.stance}
+        </span>
+      </div>
+      <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{data.basis}</p>
+      <p className="mt-1 text-xs leading-relaxed text-sky-400/80">觀察：{data.watch}</p>
+    </div>
   );
 }
 
