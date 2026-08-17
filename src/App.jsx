@@ -6,16 +6,8 @@ import TabBar from './components/TabBar.jsx';
 import AnalysisTab from './components/tabs/AnalysisTab.jsx';
 import HoldingsTab from './components/tabs/HoldingsTab.jsx';
 import PerformanceTab from './components/tabs/PerformanceTab.jsx';
-import PendingTab from './components/tabs/PendingTab.jsx';
+import AiTab from './components/tabs/AiTab.jsx';
 import { clearError } from './store/marketSlice.js';
-
-/** AI 頁預定的功能項目，來自參考站的功能盤點。 */
-const AI_SPECS = [
-  '型態分析與支撐壓力區間推估',
-  '短中長線操作建議',
-  '風險與盲點提示',
-  'AI 深度估值評估',
-];
 
 export default function App() {
   const [tab, setTab] = useState('analysis');
@@ -42,7 +34,7 @@ export default function App() {
         {tab === 'analysis' && <AnalysisTab />}
         {tab === 'holdings' && <HoldingsTab />}
         {tab === 'performance' && <PerformanceTab />}
-        {tab === 'ai' && <PendingTab title="AI 分析" items={AI_SPECS} />}
+        {tab === 'ai' && <AiTab />}
       </main>
 
       <TabBar active={tab} onChange={setTab} />

@@ -91,3 +91,25 @@ export function fetchValuation(codes) {
 export function fetchUniverse() {
   return callApi('universe');
 }
+
+/**
+ * 送出 AI 型態分析請求。
+ *
+ * 支撐壓力價位由前端以 src/lib/levels.js 算好後帶入，伺服器只負責呼叫模型解讀。
+ * 模型不產生任何價格數字，這樣回傳的價位才可逐項驗證。
+ *
+ * @param {object} payload { code, name, price, levels, indicators, recent }
+ * @returns {Promise<{ available: boolean, analysis?: object, reason?: string }>}
+ */
+export async function fetchAnalysis(payload) {
+  const res = await fetch('/api/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(json?.error ?? `AI 分析回應 ${res.status}`);
+  }
+  return json;
+}

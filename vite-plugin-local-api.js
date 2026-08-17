@@ -11,6 +11,43 @@ import { resolve } from 'node:path';
 
 const HANDLERS_PATH = resolve(process.cwd(), 'api/_lib/handlers.js');
 
+/** 請求主體的大小上限，避免異常請求把 dev server 的記憶體吃光。 */
+const MAX_BODY_BYTES = 1024 * 1024;
+
+/**
+ * 讀取並解析 JSON 請求主體。
+ * @param {import('node:http').IncomingMessage} req
+ * @returns {Promise<object>}
+ */
+function readJsonBody(req) {
+  return new Promise((resolve_, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        reject(new Error('請求主體過大'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8');
+      if (!raw) {
+        resolve_({});
+        return;
+      }
+      try {
+        resolve_(JSON.parse(raw));
+      } catch {
+        reject(new Error('請求主體不是有效的 JSON'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
 /**
  * @param {Record<string, string>} env 由 vite loadEnv 讀入的環境變數
  * @returns {import('vite').Plugin}
@@ -52,7 +89,9 @@ export default function localApiPlugin(env = {}) {
           }
 
           const query = Object.fromEntries(url.searchParams.entries());
-          const result = await handler(query, env);
+          // 正式環境由 Vercel 自動解析 JSON 主體，dev server 沒有這層，需自行讀取。
+          const body = req.method === 'POST' ? await readJsonBody(req) : {};
+          const result = await handler({ ...query, ...body }, env);
           send(result.status, result.body);
         } catch (err) {
           send(502, { error: err?.message ?? '資料取用失敗' });

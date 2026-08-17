@@ -16,13 +16,19 @@ const DEFAULT_HEADERS = {
 /**
  * 帶逾時與重試的 fetch。
  * @param {string} url
- * @param {{ headers?: Record<string,string>, timeoutMs?: number, retries?: number }} [options]
+ * @param {{
+ *   method?: string,
+ *   body?: string,
+ *   headers?: Record<string,string>,
+ *   timeoutMs?: number,
+ *   retries?: number
+ * }} [options]
  * @returns {Promise<Response>}
  */
 export async function fetchWithRetry(url, options = {}) {
   // 逾時與重試次數的乘積必須留在 vercel.json 設定的 maxDuration 之內，
   // 否則函式會被平台中斷，使用者只會看到沒有訊息的 504。
-  const { headers = {}, timeoutMs = 8000, retries = 2 } = options;
+  const { method = 'GET', body, headers = {}, timeoutMs = 8000, retries = 2 } = options;
   let lastError;
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
@@ -30,6 +36,8 @@ export async function fetchWithRetry(url, options = {}) {
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(url, {
+        method,
+        body,
         headers: { ...DEFAULT_HEADERS, ...headers },
         signal: controller.signal,
       });
