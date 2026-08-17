@@ -29,13 +29,21 @@ function toDateString(ts) {
  *
  * 使用者可能直接輸入現有部位而沒有對應的交易紀錄（例如從券商匯入既有庫存）。
  * 這些部位若不補一筆建倉交易，權益曲線會少算它們的市值。
- * 補的交易以持股的建立日期與平均成本為準，並標記為 synthetic 以便介面區分。
+ * 補的交易以平均成本為價格，並標記為 synthetic 以便介面區分。
+ *
+ * 建倉日期的取用順序是 statsStartDate、持股的 openedAt、加入系統的日期。
+ *
+ * statsStartDate 存在的理由：預設會用「登記進系統的那一天」，但那通常遠晚於實際買進日，
+ * 導致權益曲線只從登記日開始，之前的每日損益全部缺失。
+ * 若使用者的部位在某個日期之前就已買進且之後沒有異動，把起算日設到那天，
+ * 曲線就能正確回推——持股數固定，缺的只是每日收盤價，而那是可以取得的。
  *
  * @param {object[]} holdings
  * @param {object[]} transactions
+ * @param {string|null} [statsStartDate] 統計起算日 YYYY-MM-DD
  * @returns {object[]} 依日期排序的完整交易紀錄
  */
-export function normalizeTransactions(holdings, transactions) {
+export function normalizeTransactions(holdings, transactions, statsStartDate = null) {
   const covered = new Set(transactions.map((t) => t.code));
 
   const synthetic = holdings
@@ -43,7 +51,7 @@ export function normalizeTransactions(holdings, transactions) {
     .map((h) => ({
       id: `synthetic-${h.code}`,
       code: h.code,
-      date: h.openedAt ?? toDateString(h.addedAt ?? Date.now()),
+      date: statsStartDate || h.openedAt || toDateString(h.addedAt ?? Date.now()),
       shares: h.shares,
       price: h.avgCost,
       fee: 0,
@@ -249,18 +257,23 @@ export function aggregateByYear(curve) {
 
   const years = [...map.values()];
   let cumulativePnl = 0;
-  // 累積報酬的分母是「累計投入資本」：期初淨值加上歷年淨入金。
-  // 若只用第一年的期初淨值，日後每次增資都會把累積報酬率灌水。
-  let cumulativeBase = years[0]?.startNetWorth ?? 0;
+  // 累積報酬採逐年連乘的時間加權法，與匯入的週記帳採同一套算法。
+  //
+  // 不能用「累計損益 ÷ 累計投入資本」：各年度的資本規模不同，
+  // 跨年的累計損益除以任何單一基準都會失真。連乘才能正確反映複合成長，
+  // 也讓增資不會把報酬率灌水或稀釋。
+  let chained = 1;
 
   return years.map((entry) => {
     const base = entry.startNetWorth + entry.netFlow;
     cumulativePnl += entry.pnl;
-    cumulativeBase += entry.netFlow;
+    const returnPercent = base > 0 ? (entry.pnl / base) * 100 : null;
+    if (returnPercent !== null) chained *= 1 + returnPercent / 100;
     return {
       ...entry,
-      returnPercent: base > 0 ? (entry.pnl / base) * 100 : null,
-      cumulativeReturnPercent: cumulativeBase > 0 ? (cumulativePnl / cumulativeBase) * 100 : null,
+      returnPercent,
+      cumulativePnl,
+      cumulativeReturnPercent: (chained - 1) * 100,
     };
   });
 }
