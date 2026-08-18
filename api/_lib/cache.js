@@ -48,26 +48,37 @@ export function cacheSet(key, value, ttlMs) {
  * @param {() => Promise<*>} producer
  * @returns {Promise<*>}
  */
+/**
+ * 合併同一把鑰匙的併發請求：已有 producer 在執行就共用那個 promise。
+ *
+ * 只看「快取有沒有命中」是不夠的。快取要等 producer 完成才會寫入，
+ * 在那之前抵達的請求全部會撲空並各自再跑一次 producer。
+ * 績效頁一次查數十檔個股，每一檔又要數天份的全市場行情，
+ * 少了這道合併就會對上游打出上百次一模一樣的查詢，函式直接逾時。
+ *
+ * @param {string} key
+ * @param {() => Promise<*>} run
+ * @returns {Promise<*>}
+ */
+function dedupe(key, run) {
+  const pending = inflight.get(key);
+  if (pending) return pending;
+
+  const promise = run();
+  inflight.set(key, promise);
+  // 成功與失敗都要清掉，否則後續請求會一直拿到同一個被拒絕的 promise。
+  return promise.finally(() => inflight.delete(key));
+}
+
 export async function withCache(key, ttlMs, producer) {
   const hit = cacheGet(key);
   if (hit !== undefined) return hit;
 
-  // 已有同一把鑰匙在執行就共用那個 promise，不重複打上游。
-  const pending = inflight.get(key);
-  if (pending) return pending;
-
-  const promise = (async () => {
+  return dedupe(key, async () => {
     const value = await producer();
     cacheSet(key, value, ttlMs);
     return value;
-  })();
-  inflight.set(key, promise);
-  try {
-    return await promise;
-  } finally {
-    // 失敗時一併清掉，否則後續請求會一直拿到同一個被拒絕的 promise。
-    inflight.delete(key);
-  }
+  });
 }
 
 /**
@@ -87,9 +98,14 @@ export async function withCache(key, ttlMs, producer) {
 export async function withPartialCache(key, ttlMs, producer) {
   const hit = cacheGet(key);
   if (hit !== undefined) return hit;
-  const { value, complete } = await producer();
-  cacheSet(key, value, complete ? ttlMs : TTL.PARTIAL);
-  return value;
+
+  // 這裡同樣需要合併併發請求。全市場行情與除權息表都走這個包裝器，
+  // 而且是最重的兩個上游，漏掉合併正是造成 /api/history 逾時的原因。
+  return dedupe(key, async () => {
+    const { value, complete } = await producer();
+    cacheSet(key, value, complete ? ttlMs : TTL.PARTIAL);
+    return value;
+  });
 }
 
 /** 常用 TTL 常數（毫秒）。 */

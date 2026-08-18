@@ -266,7 +266,7 @@ async function loadExRights() {
       const url =
         `${TWSE_RWD}/exRight/TWT49U?startDate=${isoToCompact(start.toISOString().slice(0, 10))}` +
         `&endDate=${isoToCompact(end.toISOString().slice(0, 10))}&response=json`;
-      const json = await fetchJson(url);
+      const json = await fetchJson(url, BULK_FETCH);
       for (const row of json?.data ?? []) {
         // 欄位順序：資料日期、股票代號、股票名稱、除權息前收盤價、除權息參考價、權值+息值
         const before = toNumber(row[3]);
@@ -284,7 +284,7 @@ async function loadExRights() {
 
     // 櫃買中心：除權息預告與結果。此表沒有參考價，只能用申報的現金股利。
     try {
-      const rows = await fetchJson(`${TPEX_OPENAPI}/tpex_exright_prepost`);
+      const rows = await fetchJson(`${TPEX_OPENAPI}/tpex_exright_prepost`, BULK_FETCH);
       for (const row of rows ?? []) {
         put(
           String(row.SecuritiesCompanyCode ?? '').trim(),
@@ -325,69 +325,61 @@ function cellByField(fields, row, name) {
  *
  * 因此近期的收盤價一律以證交所與櫃買的官方行情為準，不只是補缺值。
  *
+ * 兩個市場分開查也分開快取。只持有上市股時不必去打櫃買，而且櫃買掛掉時
+ * 上市的結果不會跟著被標成不完整、每分鐘重試一次。
+ *
  * @param {string} isoDate YYYY-MM-DD
+ * @param {'TSE'|'OTC'} market
  * @returns {Promise<Record<string, {open:number|null, high:number|null, low:number|null, close:number}>>}
  */
-async function loadDailyQuotes(isoDate) {
-  return withPartialCache(`dailyquotes:${isoDate}`, TTL.DAILY, async () => {
-    const map = {};
-    let twseOk = false;
-    let tpexOk = false;
+async function loadDailyQuotes(isoDate, market) {
+  return withPartialCache(`dailyquotes:${market}:${isoDate}`, TTL.DAILY, async () => {
+    // 兩個市場的網址、欄位名稱與日期格式全都不同，只有表格結構相同。
+    const spec =
+      market === 'OTC'
+        ? {
+            url:
+              `https://www.tpex.org.tw/www/zh-tw/afterTrading/otc` +
+              `?date=${encodeURIComponent(isoDate.replace(/-/g, '/'))}&type=EW&id=&response=json`,
+            close: '收盤',
+            open: '開盤',
+            high: '最高',
+            low: '最低',
+          }
+        : {
+            url: `${TWSE_RWD}/afterTrading/MI_INDEX?date=${isoToCompact(isoDate)}&type=ALL&response=json`,
+            close: '收盤價',
+            open: '開盤價',
+            high: '最高價',
+            low: '最低價',
+          };
 
-    // 證交所：每日收盤行情（全部）。回應分成多張表，取含「收盤價」欄位的那一張。
+    const map = {};
     try {
-      const url = `${TWSE_RWD}/afterTrading/MI_INDEX?date=${isoToCompact(isoDate)}&type=ALL&response=json`;
-      const json = await fetchJson(url);
+      const json = await fetchJson(spec.url, BULK_FETCH);
+      // 回應分成多張表，取含收盤價欄位的那一張。
       for (const table of json?.tables ?? []) {
         const fields = (table.fields ?? []).map((f) => String(f).trim());
-        if (!fields.includes('收盤價')) continue;
+        if (!fields.includes(spec.close)) continue;
         for (const row of table.data ?? []) {
           const code = String(row[0] ?? '').trim();
-          const close = cellByField(fields, row, '收盤價');
+          const close = cellByField(fields, row, spec.close);
           if (!code || close === null || close <= 0) continue;
           map[code] = {
-            open: cellByField(fields, row, '開盤價'),
-            high: cellByField(fields, row, '最高價'),
-            low: cellByField(fields, row, '最低價'),
+            open: cellByField(fields, row, spec.open),
+            high: cellByField(fields, row, spec.high),
+            low: cellByField(fields, row, spec.low),
             close,
           };
         }
         break;
       }
-      twseOk = true;
     } catch {
-      // 同 loadExRights，允許只有單一市場。
-    }
-
-    // 櫃買中心：上櫃股票每日收盤行情。日期參數是西元的 YYYY/MM/DD，欄位名稱也不同。
-    try {
-      const url =
-        `https://www.tpex.org.tw/www/zh-tw/afterTrading/otc` +
-        `?date=${encodeURIComponent(isoDate.replace(/-/g, '/'))}&type=EW&id=&response=json`;
-      const json = await fetchJson(url);
-      for (const table of json?.tables ?? []) {
-        const fields = (table.fields ?? []).map((f) => String(f).trim());
-        if (!fields.includes('收盤')) continue;
-        for (const row of table.data ?? []) {
-          const code = String(row[0] ?? '').trim();
-          const close = cellByField(fields, row, '收盤');
-          if (!code || close === null || close <= 0 || map[code]) continue;
-          map[code] = {
-            open: cellByField(fields, row, '開盤'),
-            high: cellByField(fields, row, '最高'),
-            low: cellByField(fields, row, '最低'),
-            close,
-          };
-        }
-        break;
-      }
-      tpexOk = true;
-    } catch {
-      // 同上。
+      // 取不到就沿用 Yahoo 的數字，不讓整個歷史查詢失敗。
     }
 
     // 空結果不視為完整，讓盤中查詢當日資料的情形能在收盤後很快重試。
-    return { value: map, complete: twseOk && tpexOk && Object.keys(map).length > 0 };
+    return { value: map, complete: Object.keys(map).length > 0 };
   });
 }
 
@@ -396,8 +388,18 @@ async function loadDailyQuotes(isoDate) {
  *
  * 只涵蓋最近幾天：對帳看的就是這幾天，而每多一天就要多打兩次上游，
  * 且每次回應都是全市場上千列。更早的資料 Yahoo 通常已經補正確。
+ *
+ * 這個數字直接乘上冷啟動時的上游請求數，調大之前要先確認仍在 maxDuration 之內。
  */
-const OFFICIAL_CLOSE_DAYS = 6;
+const OFFICIAL_CLOSE_DAYS = 3;
+
+/**
+ * 全市場行情與除權息表的取用預算。
+ *
+ * 這兩個上游的回應都是上千列，而且是每次冷啟動必打的。逾時設短、不重試，
+ * 失敗就沿用 Yahoo 的數字——校正不到只是少一層修正，讓整個請求逾時卻是完全沒有資料。
+ */
+const BULK_FETCH = { timeoutMs: 6000, retries: 0 };
 
 /* ------------------------------------------------------------------ */
 /* 端點：歷史 K 線                                                      */
@@ -462,7 +464,9 @@ export async function historyHandler(query) {
         // 近幾個交易日改以證交所與櫃買的官方行情為準，Yahoo 只作為更早期資料的來源。
         // 這一步同時處理 Yahoo 的缺值與錯值，兩種情況都出現過。
         const recent = raw.slice(-OFFICIAL_CLOSE_DAYS);
-        const officialQuotes = await Promise.all(recent.map((c) => loadDailyQuotes(c.date)));
+        const officialQuotes = await Promise.all(
+          recent.map((c) => loadDailyQuotes(c.date, suffix === '.TWO' ? 'OTC' : 'TSE'))
+        );
         let corrected = 0;
         recent.forEach((candle, i) => {
           const row = officialQuotes[i][code];
