@@ -23,11 +23,18 @@ export const DEFAULT_MODEL = 'gemini-3.7-flash';
  * 2. **配額用盡。** 免費層是**每個模型每天各自計算**——實測 gemini-3.7-flash
  *    每日 20 次，用完後回 429，但 gemini-3.6-flash 仍然可用。
  *
- * 順序的理由：gemini-3.6-flash 是真正不同的模型，有自己的額度桶；
- * gemini-flash-latest 是別名，配額用盡時它指向的往往就是剛失敗的那一個，
- * 但在「主要模型退役」時它是唯一保證有效的目標，因此放在最後當安全網。
+ * 順序**依實測速度**排，不是依版本新舊。同一份請求在正式環境的耗時：
+ * gemini-3-flash-preview 為 12 至 15 秒，gemini-3.6-flash 為 32 至 48 秒。
+ * 預算只有五十餘秒，快的排前面直接把逾時率從一半降到接近零。
+ *
+ * gemini-flash-latest 放最後：它是別名，配額用盡時指向的往往就是剛失敗的那一個，
+ * 但在「主要模型退役」時它是唯一保證有效的目標，因此留作安全網。
+ *
+ * 這個順序只在主要模型不可用時才會走到，平常不影響輸出品質。
+ * 結構由 responseSchema 保證，不同模型的差異在敘述風格，
+ * 因此實際使用的模型會回傳並顯示在畫面上。
  */
-const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
+const FALLBACK_MODELS = ['gemini-3-flash-preview', 'gemini-3.6-flash', 'gemini-flash-latest'];
 
 /**
  * 整段流程的時間預算。
