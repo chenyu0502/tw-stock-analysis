@@ -9,11 +9,12 @@ import {
   setCash,
   today,
 } from '../../store/portfolioSlice.js';
-import { loadQuotes, loadDailyStats } from '../../store/marketSlice.js';
+import { loadQuotes, loadDailyStats, loadExDividend } from '../../store/marketSlice.js';
 import { tradeCost } from '../../lib/fees.js';
 import { positionSummary } from '../../lib/performance.js';
 import { money, pct, num, int, changeColor } from '../../lib/format.js';
 import StockCard from '../StockCard.jsx';
+import ExDividendNotice from '../ExDividendNotice.jsx';
 
 /** 單一標的市值佔比超過此門檻即提出集中度警示。 */
 const CONCENTRATION_THRESHOLD = 30;
@@ -25,6 +26,7 @@ export default function HoldingsTab() {
   const dispatch = useDispatch();
   const { holdings, cash } = useSelector((s) => s.portfolio);
   const quotes = useSelector((s) => s.market.quotes);
+  const exDividend = useSelector((s) => s.market.exDividend);
 
   const [form, setForm] = useState({ code: '', shares: '', price: '', date: today() });
   const [flowAmount, setFlowAmount] = useState('');
@@ -37,6 +39,8 @@ export default function HoldingsTab() {
     const list = codesKey.split(',');
     dispatch(loadQuotes(list));
     dispatch(loadDailyStats(list));
+    // 除權息預告是全市場一次取回，與持股清單無關，因此不隨 codesKey 重複請求太多次。
+    dispatch(loadExDividend());
   }, [codesKey, dispatch]);
 
   // 與績效頁共用同一個彙總函式，兩頁的總市值、未實現損益與總淨值不會出現分歧。
@@ -157,6 +161,8 @@ export default function HoldingsTab() {
           資金進出會記入流水並調整現金，績效頁計算報酬率時會把入金排除在獲利之外。
         </p>
       </div>
+
+      <ExDividendNotice holdings={holdings} exDividend={exDividend} />
 
       {concentrated.length > 0 && (
         <div className="flex items-start gap-2 rounded-xl border border-amber-800/60 bg-amber-950/30 p-3 text-xs text-amber-300">

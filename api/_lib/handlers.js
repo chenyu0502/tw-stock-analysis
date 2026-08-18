@@ -303,6 +303,82 @@ async function loadExRights() {
 }
 
 /**
+ * GET /api/exdividend
+ *
+ * 即將除權息的標的。來源為證交所的除權除息預告表與櫃買的除權息預告，
+ * 兩者都只涵蓋已公告的區間（實測約往後兩個月）。
+ *
+ * 與 loadExRights() 的差別：那個用的是**結果表**，只有已經發生的，
+ * 用途是還原歷史淨值；這裡要的是還沒發生的，用途是提醒。
+ *
+ * 配息金額可能尚未定案。證交所在該欄位放的是「待公告實際收益分配金額」這串文字
+ * （而且帶 HTML 標籤），此時金額回傳 null，由介面顯示「金額待公告」，
+ * 不可當成零——那會讓使用者以為這次不配息。
+ */
+export async function exDividendHandler() {
+  const today = new Date().toISOString().slice(0, 10);
+
+  const body = await withPartialCache('exdividend:upcoming', TTL.DAILY, async () => {
+    const items = [];
+    let twseOk = false;
+    let tpexOk = false;
+
+    // 證交所：除權除息預告表。不帶日期參數，回傳的就是目前已公告的整個區間。
+    try {
+      const json = await fetchJson(`${TWSE_RWD}/exRight/TWT48U?response=json`, BULK_FETCH);
+      for (const row of json?.data ?? []) {
+        const date = rocToIso(row[0]);
+        const code = String(row[1] ?? '').trim();
+        if (!date || !code || date < today) continue;
+        items.push({
+          code,
+          name: String(row[2] ?? '').trim(),
+          date,
+          // 欄位順序：日期、代號、名稱、權/息、無償配股率、現金增資配股率、認購價、現金股利
+          cash: toNumber(row[7]),
+          stock: toNumber(row[4]),
+          kind: String(row[3] ?? '').trim(),
+          market: 'TSE',
+        });
+      }
+      twseOk = true;
+    } catch {
+      // 單一市場失敗不應讓另一個市場的提醒一起消失。
+    }
+
+    // 櫃買：除權息預告與結果同表，需自行濾掉已發生的日期。
+    try {
+      const rows = await fetchJson(`${TPEX_OPENAPI}/tpex_exright_prepost`, BULK_FETCH);
+      for (const row of rows ?? []) {
+        const date = rocToIso(row.ExRrightsExDividendDate);
+        const code = String(row.SecuritiesCompanyCode ?? '').trim();
+        if (!date || !code || date < today) continue;
+        items.push({
+          code,
+          name: String(row.CompanyName ?? '').trim(),
+          date,
+          cash: toNumber(row.CashDividend),
+          stock: toNumber(row.StockDividendRatio),
+          kind: String(row.ExRrightsExDividend ?? '').trim(),
+          market: 'OTC',
+        });
+      }
+      tpexOk = true;
+    } catch {
+      // 同上。
+    }
+
+    items.sort((a, b) => a.date.localeCompare(b.date) || a.code.localeCompare(b.code));
+    return {
+      value: { items, from: today, fetchedAt: new Date().toISOString() },
+      complete: twseOk && tpexOk,
+    };
+  });
+
+  return { status: 200, body };
+}
+
+/**
  * 從表格中依欄位名稱取出數值，找不到欄位回傳 null。
  * @param {string[]} fields
  * @param {string[]} row
@@ -931,6 +1007,7 @@ export const routes = {
   institutional: institutionalHandler,
   valuation: valuationHandler,
   fundamentals: fundamentalsHandler,
+  exdividend: exDividendHandler,
   universe: universeHandler,
   analyze: analyzeHandler,
 };

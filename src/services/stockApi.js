@@ -96,6 +96,14 @@ export function fetchFundamentals(code) {
 }
 
 /**
+ * 取得即將除權息的標的清單（全市場，已公告的區間約往後兩個月）。
+ * 單次請求涵蓋所有代號，由前端自行比對持股。
+ */
+export function fetchExDividend() {
+  return callApi('exdividend');
+}
+
+/**
  * 取得全市場代號名稱對照表。資料量約 2000 筆，載入後應快取於記憶體。
  */
 export function fetchUniverse() {

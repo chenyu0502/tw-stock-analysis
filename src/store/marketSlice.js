@@ -36,6 +36,16 @@ export const loadFundamentals = createAsyncThunk(
   }
 );
 
+/**
+ * 載入即將除權息的清單。
+ *
+ * 全市場只需一次請求，因此不帶參數也不分代號快取，
+ * 由使用端自行比對自己關心的標的。
+ */
+export const loadExDividend = createAsyncThunk('market/loadExDividend', async () =>
+  api.fetchExDividend()
+);
+
 /** 一次載入融資融券、三大法人、估值三項每日更新的資料。 */
 export const loadDailyStats = createAsyncThunk('market/loadDailyStats', async (codes) => {
   // 三個端點互不相依，並行取用。任一失敗不應拖垮其他兩項，因此用 allSettled。
@@ -61,6 +71,11 @@ const initialState = {
   valuation: {},
   /** 各檔的基本面深度指標，鍵為代號，值為 { available, bands, revenue, income, ... } */
   fundamentals: {},
+  /**
+   * 即將除權息的標的，鍵為代號，值為該檔最近一次的 { date, cash, stock, kind }。
+   * 同一檔在公告區間內可能有多筆（月配 ETF），只留最近的那一次。
+   */
+  exDividend: {},
   loading: { quotes: false, history: false, daily: false, chips: false, fundamentals: false },
   error: null,
   lastQuoteAt: null,
@@ -99,6 +114,19 @@ const marketSlice = createSlice({
       .addCase(loadHistory.rejected, (state, action) => {
         state.loading.history = false;
         state.error = action.error.message;
+      })
+
+      .addCase(loadExDividend.fulfilled, (state, action) => {
+        // 上游已依日期排序，先到的即為最近一次，因此同一檔只寫入第一筆。
+        const map = {};
+        for (const item of action.payload.items ?? []) {
+          if (!map[item.code]) map[item.code] = item;
+        }
+        state.exDividend = map;
+      })
+      .addCase(loadExDividend.rejected, (state) => {
+        // 除息提醒是加值資訊，取不到就不顯示，不打斷其他功能也不蓋掉報價錯誤訊息。
+        state.exDividend = {};
       })
 
       .addCase(loadFundamentals.pending, (state) => {

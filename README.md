@@ -104,7 +104,8 @@ vite-plugin-local-api.js 開發模式的 API 中介層
 | 上櫃估值 | 櫃買中心 OpenAPI | `/v1/tpex_mainboard_peratio_analysis` |
 | 代號對照 | 兩者合併 | `STOCK_DAY_ALL` 與 `tpex_mainboard_quotes` |
 | 近期官方收盤行情 | 證交所／櫃買 | `MI_INDEX` 與 `afterTrading/otc` |
-| 除權除息 | 證交所／櫃買 | `exRight/TWT49U` 與 `tpex_exright_prepost` |
+| 除權除息（已發生） | 證交所／櫃買 | `exRight/TWT49U` 與 `tpex_exright_prepost` |
+| 除權除息（預告） | 證交所／櫃買 | `exRight/TWT48U` 與 `tpex_exright_prepost` |
 | 估值歷史分位 | FinMind | `TaiwanStockPER` |
 | 月營收 | FinMind | `TaiwanStockMonthRevenue` |
 | 損益表與資產負債表 | FinMind | `TaiwanStockFinancialStatements`、`TaiwanStockBalanceSheet` |
@@ -183,6 +184,29 @@ FinMind 的 `year` 欄位是「114年第2季」這種格式。
 
 模型自行提出的疑慮另外放在「AI 判讀的盲點」，與這份清單分開，
 因為兩者的可信度完全不同。
+
+### 除息提醒
+
+除息當天股價**必然**扣除配息金額，帳面市值同步下降。這與其他風險不同——
+它不是「可能會不好」，而是「一定會發生」。不知情的人會把它讀成下跌，
+但錢只是還沒到，實際撥付約在除息後一個多月。
+
+資料來自證交所的除權除息**預告表** `TWT48U` 與櫃買的 `tpex_exright_prepost`，
+涵蓋已公告的區間（實測約往後兩個月）。這與權益曲線用的 `TWT49U` 是不同的表：
+那個是**結果表**，只有已經發生的，用途是還原歷史淨值。
+
+兩個實作重點：
+
+1. **金額可能尚未定案。** 證交所在該欄位放的是「待公告實際收益分配金額」，
+   而且帶 HTML 標籤。此時金額為 `null`，介面寫「待公告」——
+   **不可當成零**，那會讓人以為這次不配息。
+2. **只提醒 30 天內的。** 預告表涵蓋兩個月，但兩個月後的除息現在不需要注意，
+   全列出來只會把真正接近的那幾檔淹沒。門檻是 `THRESHOLDS.exDividendWithinDays`。
+
+提醒放在**持股頁**而不只是個股分析裡。除息影響的是整個帳戶：
+持有十幾檔月配 ETF 時，光看單一檔看不出「這個月會有幾次、總共領多少」。
+持股頁的橫幅會列出即將除息的持股、每股金額與依股數估算的總額；
+個股層級的提醒則併入 AI 頁的風險清單。
 
 ### 額度
 

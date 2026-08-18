@@ -41,7 +41,27 @@ export const THRESHOLDS = {
   institutionalSellStreak: 5,
   /** RSI 超買 */
   rsiOverbought: 75,
+  /**
+   * 除息日在幾天內才提醒。
+   *
+   * 預告表涵蓋約兩個月，但兩個月後的除息現在不構成需要注意的事，
+   * 全部列出只會把真正接近的那幾檔淹沒。
+   */
+  exDividendWithinDays: 30,
 };
+
+/**
+ * 兩個日期字串相差幾天。用 UTC 正午避開時區與日光節約造成的差一天。
+ * @param {string} from YYYY-MM-DD
+ * @param {string} to YYYY-MM-DD
+ * @returns {number|null}
+ */
+export function daysBetween(from, to) {
+  const a = Date.parse(`${from}T12:00:00Z`);
+  const b = Date.parse(`${to}T12:00:00Z`);
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  return Math.round((b - a) / 86400000);
+}
 
 /**
  * 建立一則風險項目。
@@ -72,7 +92,8 @@ function n(value, digits = 1) {
  * @param {object|null} [params.recent] analysisInput 的 recent
  * @param {object|null} [params.chips] analysisInput 的 chips
  * @param {object[]} [params.chipSeries] 法人買賣超歷史，用於連續賣超判斷
- * @param {object|null} [params.dividendSchedule] { exDate } 即將到來的除息日
+ * @param {object|null} [params.dividendSchedule] 即將除權息 { date, cash, stock, kind }
+ * @param {string|null} [params.today] 今日日期，供測試固定時間
  * @returns {object[]}
  */
 export function detectRisks({
@@ -82,6 +103,7 @@ export function detectRisks({
   chips = null,
   chipSeries = [],
   dividendSchedule = null,
+  today = null,
 } = {}) {
   const out = [];
 
@@ -238,18 +260,51 @@ export function detectRisks({
   }
 
   /* --- 事件 --- */
-  if (dividendSchedule?.exDate) {
-    out.push(
-      risk(
-        'ex-dividend',
-        'low',
-        '事件',
-        `${dividendSchedule.exDate} 除息，當日股價會扣除配息金額，帳面市值將同步下降`
-      )
-    );
-  }
+  const ex = describeExDividend(dividendSchedule, today);
+  if (ex) out.push(ex);
 
   return out.sort((a, b) => SEVERITY[b.severity] - SEVERITY[a.severity]);
+}
+
+/**
+ * 即將除權息的提醒。
+ *
+ * 這一條與其他風險的性質不同：它不是「可能會不好」，而是「一定會發生」。
+ * 除息當天股價必然扣除配息金額，帳面市值同步下降，
+ * 不知情的人會以為是下跌。錢會在一個多月後入帳，只是時間差。
+ *
+ * 配息金額尚未定案時上游給的是「待公告實際收益分配金額」，
+ * 此時金額為 null，必須寫成「金額待公告」而不是零——
+ * 零會讓人以為這次不配息。
+ *
+ * @param {object|null} schedule { date, cash, stock, kind }
+ * @param {string|null} today
+ * @returns {object|null}
+ */
+export function describeExDividend(schedule, today = null) {
+  if (!schedule?.date) return null;
+  const base = today ?? new Date().toISOString().slice(0, 10);
+  const days = daysBetween(base, schedule.date);
+  if (days === null || days < 0 || days > THRESHOLDS.exDividendWithinDays) return null;
+
+  const when = days === 0 ? '今日' : `${days} 天後（${schedule.date}）`;
+  const parts = [];
+  if (Number.isFinite(schedule.cash) && schedule.cash > 0) {
+    parts.push(`每股配息 ${schedule.cash.toFixed(2)} 元`);
+  }
+  if (Number.isFinite(schedule.stock) && schedule.stock > 0) {
+    parts.push(`無償配股率 ${schedule.stock.toFixed(4)}`);
+  }
+  const amount = parts.length > 0 ? parts.join('，') : '金額尚待公告';
+
+  return risk(
+    'ex-dividend',
+    // 三天內視為需要注意，較遠的只是提醒。
+    days <= 3 ? 'medium' : 'low',
+    '事件',
+    `${when}除${schedule.kind || '息'}，${amount}。` +
+      `當日股價會扣除該金額，帳面市值同步下降，現金約一個多月後入帳`
+  );
 }
 
 /**
