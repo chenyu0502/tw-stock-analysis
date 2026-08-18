@@ -3,6 +3,7 @@ import { useSelector, useDispatch } from 'react-redux';
 import { X } from 'lucide-react';
 import Header from './components/Header.jsx';
 import TabBar from './components/TabBar.jsx';
+import UpdateBanner from './components/UpdateBanner.jsx';
 import AnalysisTab from './components/tabs/AnalysisTab.jsx';
 import HoldingsTab from './components/tabs/HoldingsTab.jsx';
 import PerformanceTab from './components/tabs/PerformanceTab.jsx';
@@ -16,6 +17,7 @@ export default function App() {
 
   return (
     <div className="min-h-full">
+      <UpdateBanner />
       <Header />
 
       {error && (
