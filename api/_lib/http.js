@@ -14,6 +14,12 @@ const DEFAULT_HEADERS = {
 };
 
 /**
+ * 一次嘗試至少要有的時間。剩餘預算低於此值就不再送出，
+ * 免得發出一個注定被截斷的請求，白白佔用上游額度。
+ */
+const MIN_ATTEMPT_MS = 1500;
+
+/**
  * 帶逾時與重試的 fetch。
  * @param {string} url
  * @param {{
@@ -21,19 +27,37 @@ const DEFAULT_HEADERS = {
  *   body?: string,
  *   headers?: Record<string,string>,
  *   timeoutMs?: number,
- *   retries?: number
- * }} [options]
+ *   retries?: number,
+ *   deadline?: number|null
+ * }} [options] deadline 為整段流程的絕對截止時間（Date.now() 基準）
  * @returns {Promise<Response>}
  */
 export async function fetchWithRetry(url, options = {}) {
   // 逾時與重試次數的乘積必須留在 vercel.json 設定的 maxDuration 之內，
   // 否則函式會被平台中斷，使用者只會看到沒有訊息的 504。
-  const { method = 'GET', body, headers = {}, timeoutMs = 8000, retries = 2 } = options;
+  //
+  // 光靠這兩個參數不夠：呼叫端若把同一份請求對多個上游依序嘗試，乘積會再翻倍。
+  // deadline 是整段流程的絕對截止時間，用來把總時間釘死，
+  // 每次嘗試只能用到剩餘時間，不夠就直接放棄而不是硬送出去等平台砍。
+  const {
+    method = 'GET',
+    body,
+    headers = {},
+    timeoutMs = 8000,
+    retries = 2,
+    deadline = null,
+  } = options;
   let lastError;
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const remaining = deadline === null ? Infinity : deadline - Date.now();
+    if (remaining <= MIN_ATTEMPT_MS) {
+      throw lastError ?? new Error('已逾時，來不及送出請求');
+    }
+    const effectiveTimeout = Math.min(timeoutMs, remaining);
+
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timer = setTimeout(() => controller.abort(), effectiveTimeout);
     try {
       const res = await fetch(url, {
         method,
@@ -54,8 +78,12 @@ export async function fetchWithRetry(url, options = {}) {
     }
     // 指數退避：400ms、800ms、1600ms。
     // 上游忙碌（503）時立刻重試多半還是被拒，等待一段時間成功率明顯較高。
+    // 退避本身也要吃剩餘預算，否則會在時間已經不夠時還先睡一秒。
     if (attempt < retries) {
-      await new Promise((resolve) => setTimeout(resolve, 400 * 2 ** attempt));
+      const backoff = 400 * 2 ** attempt;
+      const left = deadline === null ? Infinity : deadline - Date.now();
+      if (left <= MIN_ATTEMPT_MS + backoff) break;
+      await new Promise((resolve) => setTimeout(resolve, backoff));
     }
   }
   throw lastError ?? new Error('未知的上游錯誤');

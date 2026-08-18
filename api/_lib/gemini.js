@@ -29,6 +29,21 @@ export const DEFAULT_MODEL = 'gemini-3.7-flash';
  */
 const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
 
+/**
+ * 整段流程的時間預算。
+ *
+ * 必須明顯小於 vercel.json 的 maxDuration（60 秒），留下回應與序列化的餘裕。
+ * 超過的話函式會被平台直接中斷，前端拿到的是沒有任何訊息的 504，
+ * 使用者無從得知是額度用完、上游忙碌還是網路問題。
+ */
+const TOTAL_BUDGET_MS = 50000;
+
+/** 一個模型至少要有這麼多時間才值得嘗試，否則不如把錯誤如實回報。 */
+const MIN_MODEL_ATTEMPT_MS = 6000;
+
+/** 單一模型的最長等待。實測一次生成約十至二十秒，超過多半是上游卡住。 */
+const PER_MODEL_TIMEOUT_MS = 28000;
+
 /** 判斷錯誤是否為模型不可用，這種情況重試同一個模型沒有意義。 */
 function isModelUnavailable(message) {
   return /no longer available|not found|is not supported/i.test(message);
@@ -63,10 +78,17 @@ export async function generateJson(params) {
   // 已在鏈上的主要模型不重複嘗試。
   const chain = [primary, ...FALLBACK_MODELS.filter((m) => m !== primary)];
 
+  // 整段流程的截止時間。逐一嘗試多個模型時，每個模型的逾時會相加，
+  // 沒有總預算就會超過 vercel.json 的 maxDuration，
+  // 使用者看到的是沒有任何訊息的 504——比一句「服務忙碌」還難處理。
+  const deadline = Date.now() + TOTAL_BUDGET_MS;
+
   let lastError;
   for (const model of chain) {
+    // 剩餘時間不足以完成一次有意義的嘗試就停手，把錯誤如實回報。
+    if (deadline - Date.now() <= MIN_MODEL_ATTEMPT_MS) break;
     try {
-      return { data: await callModel(model, params), model };
+      return { data: await callModel(model, { ...params, deadline }), model };
     } catch (err) {
       lastError = err;
       // 只有「模型不可用」與「配額用盡」值得換模型。
@@ -84,7 +106,10 @@ export async function generateJson(params) {
  * @param {object} params 同 generateJson
  * @returns {Promise<object>}
  */
-async function callModel(target, { apiKey, systemInstruction, prompt, schema, temperature = 0.2 }) {
+async function callModel(
+  target,
+  { apiKey, systemInstruction, prompt, schema, temperature = 0.2, deadline = null }
+) {
   const url = `${GEMINI_BASE}/models/${encodeURIComponent(target)}:generateContent`;
 
   const res = await fetchWithRetry(url, {
@@ -103,10 +128,11 @@ async function callModel(target, { apiKey, systemInstruction, prompt, schema, te
         temperature,
       },
     }),
-    timeoutMs: 45000,
-    // 實測 Gemini 會間歇回傳 503（模型忙碌），單次重試不足以吸收。
-    // 三次重試加上退避後，總耗時最壞約 25 秒，仍在函式執行上限之內。
-    retries: 3,
+    timeoutMs: PER_MODEL_TIMEOUT_MS,
+    // 只重試一次。有備援模型可用時，換一個模型比反覆敲同一個忙碌的模型划算，
+    // 而且預算有限——重試三次會把時間全部吃掉，一個備援都輪不到。
+    retries: 1,
+    deadline,
   });
 
   const text = await res.text();
