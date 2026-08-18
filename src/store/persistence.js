@@ -8,6 +8,7 @@
  */
 
 import { hydrate } from './portfolioSlice.js';
+import { mergePortfolio } from './merge.js';
 import { loadPortfolio, savePortfolio } from '../lib/firebase.js';
 
 const STORAGE_KEY = 'tw-stock-portfolio-v1';
@@ -37,59 +38,6 @@ export function writeLocal(data) {
   } catch {
     // 無痕模式或配額用盡時會失敗，這不影響當次操作，靜默略過。
   }
-}
-
-/**
- * 合併本機與雲端資料。
- *
- * 以 code 為鍵去重，同一檔在兩邊都有時保留 addedAt 較新的那一筆。
- * cash 取雲端值，因為它是單一數值無從合併，雲端代表較正式的紀錄。
- * @param {object|null} local
- * @param {object|null} cloud
- * @returns {object}
- */
-export function mergePortfolio(local, cloud) {
-  const empty = {
-    watchlist: [],
-    holdings: [],
-    transactions: [],
-    cashFlows: [],
-    cash: 0,
-    statsStartDate: null,
-  };
-  if (!cloud) return local ?? empty;
-  if (!local) return cloud;
-
-  /** 以 code 去重，同一檔兩邊都有時保留較新的一筆。 */
-  const mergeByCode = (a = [], b = []) => {
-    const map = new Map();
-    for (const item of [...a, ...b]) {
-      const prev = map.get(item.code);
-      if (!prev || (item.addedAt ?? 0) > (prev.addedAt ?? 0)) map.set(item.code, item);
-    }
-    return [...map.values()];
-  };
-
-  /**
-   * 以 id 去重。交易與資金流水是逐筆事件，不能像持股那樣以 code 覆蓋，
-   * 否則同一檔的多筆買賣只會留下一筆。
-   */
-  const mergeById = (a = [], b = []) => {
-    const map = new Map();
-    for (const item of [...a, ...b]) map.set(item.id, item);
-    return [...map.values()].sort((x, y) => String(x.date).localeCompare(String(y.date)));
-  };
-
-  return {
-    watchlist: mergeByCode(local.watchlist, cloud.watchlist),
-    holdings: mergeByCode(local.holdings, cloud.holdings),
-    transactions: mergeById(local.transactions, cloud.transactions),
-    cashFlows: mergeById(local.cashFlows, cloud.cashFlows),
-    cash: cloud.cash ?? local.cash ?? 0,
-    // 統計起算日是單一設定值，無從合併，以雲端為準。
-    // 漏掉這一項會讓登入後的同步把本機設定清成 null，使用者得重設一次。
-    statsStartDate: cloud.statsStartDate ?? local.statsStartDate ?? null,
-  };
 }
 
 /**
@@ -142,3 +90,5 @@ export async function syncFromCloud(store, uid) {
     // 雲端不可用時維持本機資料運作。
   }
 }
+
+export { mergePortfolio };

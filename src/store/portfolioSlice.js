@@ -45,7 +45,38 @@ const initialState = {
    * 留空則沿用各持股自己的建倉日。
    */
   statsStartDate: null,
+  /**
+   * 刪除標記（墓碑）：集合名稱 → 鍵 → 刪除時間。
+   *
+   * 存在的理由是雲端合併採聯集，**刪除本身無法透過聯集傳遞**。
+   * 使用者刪掉一筆紀錄後，雲端那份還在，下次開啟合併時又被加回來，
+   * 看起來就像「刪不掉、每次重開又出現」。
+   *
+   * 記下刪除這個動作本身，合併時據以濾除，刪除才會生效。
+   * 追蹤標的與持股以代號為鍵，交易與資金流水以 id 為鍵。
+   */
+  deleted: { watchlist: {}, holdings: {}, transactions: {}, cashFlows: {} },
 };
+
+/** 墓碑的集合名稱，用於初始化與合併時逐一處理。 */
+export const DELETABLE = ['watchlist', 'holdings', 'transactions', 'cashFlows'];
+
+/** 標記一筆刪除。 */
+function markDeleted(state, collection, key) {
+  if (!key) return;
+  state.deleted[collection] ??= {};
+  state.deleted[collection][String(key)] = Date.now();
+}
+
+/**
+ * 清掉刪除標記。
+ *
+ * 重新加入同一個代號時必須呼叫，否則墓碑會把剛加進去的東西又濾掉，
+ * 症狀是「新增後重開就不見了」——與原本的問題剛好相反。
+ */
+function clearDeleted(state, collection, key) {
+  if (state.deleted?.[collection]) delete state.deleted[collection][String(key)];
+}
 
 const portfolioSlice = createSlice({
   name: 'portfolio',
@@ -60,6 +91,12 @@ const portfolioSlice = createSlice({
       state.cashFlows = Array.isArray(data.cashFlows) ? data.cashFlows : [];
       state.cash = Number.isFinite(data.cash) ? data.cash : 0;
       state.statsStartDate = data.statsStartDate ?? null;
+      // 舊資料沒有這個欄位，逐一補上空物件，避免後續存取時炸開。
+      state.deleted = {};
+      for (const name of DELETABLE) {
+        const value = data.deleted?.[name];
+        state.deleted[name] = value && typeof value === 'object' ? value : {};
+      }
     },
 
     /** 設定統計起算日，傳入空值即清除。 */
@@ -71,6 +108,7 @@ const portfolioSlice = createSlice({
     addWatch(state, action) {
       const code = String(action.payload.code ?? '').trim();
       if (!code || state.watchlist.some((w) => w.code === code)) return;
+      clearDeleted(state, 'watchlist', code);
       state.watchlist.push({
         code,
         note: action.payload.note ?? '',
@@ -81,6 +119,7 @@ const portfolioSlice = createSlice({
     },
 
     removeWatch(state, action) {
+      markDeleted(state, 'watchlist', action.payload);
       state.watchlist = state.watchlist.filter((w) => w.code !== action.payload);
     },
 
@@ -107,6 +146,8 @@ const portfolioSlice = createSlice({
 
       const existing = state.holdings.find((h) => h.code === code);
       let realized = null;
+      // 曾經移除又重新買進的標的，要先撤掉墓碑，否則合併時會把它濾掉。
+      clearDeleted(state, 'holdings', code);
 
       if (shares < 0) {
         // 賣出時結算已實現損益。採平均成本法，與 avgCost 的維護方式一致。
@@ -159,6 +200,7 @@ const portfolioSlice = createSlice({
     },
 
     removeTransaction(state, action) {
+      markDeleted(state, 'transactions', action.payload);
       state.transactions = state.transactions.filter((t) => t.id !== action.payload);
     },
 
@@ -178,10 +220,16 @@ const portfolioSlice = createSlice({
     dropTransactionsForCodes(state, action) {
       const codes = new Set(action.payload ?? []);
       if (codes.size === 0) return;
+      // 墓碑以 id 為鍵，因此要逐筆標記，不能只記代號——
+      // 之後若又為同一檔新增交易，那筆新紀錄的 id 不同，不會被誤濾。
+      for (const t of state.transactions) {
+        if (codes.has(t.code)) markDeleted(state, 'transactions', t.id);
+      }
       state.transactions = state.transactions.filter((t) => !codes.has(t.code));
     },
 
     removeHolding(state, action) {
+      markDeleted(state, 'holdings', action.payload);
       state.holdings = state.holdings.filter((h) => h.code !== action.payload);
     },
 
@@ -205,6 +253,7 @@ const portfolioSlice = createSlice({
     },
 
     removeCashFlow(state, action) {
+      markDeleted(state, 'cashFlows', action.payload);
       const flow = state.cashFlows.find((c) => c.id === action.payload);
       if (!flow) return;
       state.cashFlows = state.cashFlows.filter((c) => c.id !== action.payload);
