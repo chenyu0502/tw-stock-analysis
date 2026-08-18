@@ -131,7 +131,13 @@ export default function PerformanceTab() {
   const missingHistory = historyCodes.filter((code) => !history[code]).length;
   // 歷史現金由目前餘額往回推算，出現負值代表「帳上現金」與交易紀錄對不起來，
   // 通常是漏記了入金。這會讓淨值與報酬率失真，必須讓使用者知道。
-  const hasNegativeCash = curve.some((r) => r.cash < 0);
+  //
+  // 配息採除息日應計，但實際入帳約在一個多月後，「帳上現金」多半還沒收到這筆錢，
+  // 往回推算的歷史現金會整段偏低。檢查時把累計配息加回，否則單純因為配息就會誤報。
+  const totalDividend = latest?.cumulativeDividend ?? 0;
+  const hasNegativeCash = curve.some(
+    (r) => r.cash + (totalDividend - (r.cumulativeDividend ?? 0)) < 0
+  );
 
   return (
     <div className="space-y-4">
@@ -272,7 +278,10 @@ export default function PerformanceTab() {
       </Panel>
 
       {/* 每日損益月曆 */}
-      <Panel title="每日損益月曆">
+      <Panel
+        title="每日損益月曆"
+        note="以每日收盤淨值變動計算。除息日已把「持股數 × 每股配息」計入，不會出現等於配息的假性虧損"
+      >
         <PnlCalendar curve={curve} />
       </Panel>
 

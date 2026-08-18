@@ -8,6 +8,10 @@
  * 每日損益的定義：
  *   當日損益 = 當日淨值 - 前一日淨值 - 當日淨入金
  * 扣掉淨入金是必要的，否則匯入一筆資金會被當成獲利。
+ *
+ * 配息在除息日當天以「持股數 × 每股配息」計入現金。收盤價是未還原的原始價格，
+ * 除息當天會直接跌掉配息金額，不補這筆現金的話那天會憑空多出一筆等於配息的虧損。
+ * 實際入帳通常在除息後一個多月，這裡採除息日應計制，與券商對帳單的現金餘額會有時間差。
  */
 
 /* ------------------------------------------------------------------ */
@@ -81,9 +85,10 @@ export function normalizeTransactions(holdings, transactions, statsStartDate = n
  * @param {object[]} params.transactions 已正規化的交易紀錄
  * @param {object[]} params.cashFlows 資金流水
  * @param {number} params.currentCash 目前帳上現金
- * @param {Record<string, {candles: object[]}>} params.historyByCode 各檔歷史 K 線
+ * @param {Record<string, {candles: object[], dividends?: {date:string, amount:number}[]}>} params.historyByCode
+ *        各檔歷史 K 線與除權息事件
  * @param {string|null} [params.startDate] 統計起算日，早於此日的交易併入期初部位
- * @returns {{date:string, cash:number, positionValue:number, netWorth:number, netFlow:number, pnl:number, cumulativePnl:number}[]}
+ * @returns {{date:string, cash:number, positionValue:number, netWorth:number, netFlow:number, pnl:number, cumulativePnl:number, cumulativeDividend:number}[]}
  */
 export function buildEquityCurve({
   transactions,
@@ -108,6 +113,14 @@ export function buildEquityCurve({
   }
   const allDates = [...dateSet].sort();
   if (allDates.length === 0) return [];
+
+  // 各檔的除息日到每股配息金額。同一天同一檔只會有一筆。
+  const divByCode = {};
+  for (const code of codes) {
+    divByCode[code] = new Map(
+      (historyByCode[code]?.dividends ?? []).map((d) => [d.date, d.amount])
+    );
+  }
 
   // 帳戶成立前的日期必須排除。
   //
@@ -161,12 +174,50 @@ export function buildEquityCurve({
   // 期初之前的入金已含在目前現金裡，不需另外處理，此變數僅供除錯時對帳。
   void openingCashAdjust;
 
+  // 統計區間前一個交易日的期初部位市值。
+  //
+  // 有了它，區間第一天才有前一日淨值可比。先前第一天的損益一律歸零，
+  // 設定起算日為 8/1 時，8/3 相對於 7/31 收盤的漲跌整天消失，當月損益因此短少一天。
+  // 歸零原本是為了避免把期初入金算成當天的巨額虧損，但那個問題的根源是
+  // 缺少前一日淨值，補上基準即可，不需要整天棄用。
+  const prevDate = foundIndex > 0 ? allDates[foundIndex - 1] : null;
+  let openingPositionValue = 0;
+  let openingValuationOk = true;
+  for (const code of codes) {
+    const shares = openingShares[code] ?? 0;
+    if (shares === 0) continue;
+    // 個股在前一交易日可能沒有報價（停牌或當天無成交），往前找最近一筆收盤價。
+    let close;
+    for (let i = allDates.indexOf(prevDate); i >= 0; i -= 1) {
+      close = closeByCode[code].get(allDates[i]);
+      if (close !== undefined) break;
+    }
+    // 期初就持有卻查不到區間之前的價格，代表無從比較，第一天只能維持歸零。
+    if (close === undefined) {
+      openingValuationOk = false;
+      break;
+    }
+    openingPositionValue += shares * close;
+  }
+
   // 先正推持股與現金變動量，再由目前現金往回推算每日現金。
   const held = { ...openingShares };
   const rows = [];
   let cumulativeCashDelta = 0;
+  let cumulativeDividend = 0;
 
   for (const date of dates) {
+    // 配息先於當日買賣結算。除息日的領息資格看的是前一交易日收盤的持股，
+    // 當天才買進的部位不參與這次配息。
+    for (const code of codes) {
+      const amount = divByCode[code].get(date);
+      if (!amount) continue;
+      const shares = held[code] ?? 0;
+      if (shares <= 0) continue;
+      cumulativeCashDelta += shares * amount;
+      cumulativeDividend += shares * amount;
+    }
+
     const todayTx = txByDate.get(date) ?? [];
     for (const tx of todayTx) {
       held[tx.code] = (held[tx.code] ?? 0) + tx.shares;
@@ -192,7 +243,7 @@ export function buildEquityCurve({
       priceByCode[code] = close ?? rows[rows.length - 1]?.priceByCode?.[code] ?? 0;
     }
 
-    rows.push({ date, positionValue, netFlow, cumulativeCashDelta, priceByCode });
+    rows.push({ date, positionValue, netFlow, cumulativeCashDelta, cumulativeDividend, priceByCode });
   }
 
   // 目前現金對應曲線最後一日，往前每天加回之後發生的資金變動。
@@ -203,13 +254,17 @@ export function buildEquityCurve({
     const cash = currentCash - (finalCashDelta - row.cumulativeCashDelta);
     const netWorth = cash + row.positionValue;
 
-    // 第一天沒有前一日可比，損益必須直接定為零。
-    // 若照公式算（本日淨值減前日淨值再減淨入金），期初入金會被算成當天的巨額虧損。
     let pnl = 0;
     if (i > 0) {
       const prev = rows[i - 1];
       const prevNetWorth =
         currentCash - (finalCashDelta - prev.cumulativeCashDelta) + prev.positionValue;
+      pnl = netWorth - prevNetWorth - row.netFlow;
+    } else if (openingValuationOk) {
+      // 第一天比對的是區間前一個交易日：現金變動量尚為零，部位以前一日收盤價計算。
+      // 扣掉當日淨入金後，期初入金不會被算成虧損；當天才建倉的部位也只計入
+      // 成交價到收盤價的價差，不會把入金誤當損益。
+      const prevNetWorth = currentCash - finalCashDelta + openingPositionValue;
       pnl = netWorth - prevNetWorth - row.netFlow;
     }
     cumulativePnl += pnl;
@@ -222,6 +277,9 @@ export function buildEquityCurve({
       netFlow: row.netFlow,
       pnl,
       cumulativePnl,
+      // 截至當日的累計配息。配息實際入帳約在除息後一個多月，「帳上現金」通常還沒收到，
+      // 往回推算的歷史現金會因此整段偏低。判斷現金是否真的為負時要把這部分加回。
+      cumulativeDividend: row.cumulativeDividend,
     };
   });
 }

@@ -213,6 +213,10 @@ export async function quoteHandler(query) {
  *
  * 資料來源 Yahoo Finance。台股代號需加市場後綴：上市 .TW、上櫃 .TWO。
  * 對照表查不到時，兩種後綴依序嘗試。
+ *
+ * 一併帶回除權息事件（events=div）。收盤價是未還原的原始價格，除息當天會直接
+ * 跌掉配息金額；績效計算若只看價差，那一天會憑空多出一筆等於配息的虧損。
+ * 把配息金額交給前端，權益曲線才能在除息日補回這筆現金。
  */
 export async function historyHandler(query) {
   const code = String(query.code ?? '').trim();
@@ -238,7 +242,7 @@ export async function historyHandler(query) {
     let lastError;
     for (const suffix of suffixes) {
       try {
-        const url = `${YAHOO_CHART}/${code}${suffix}?interval=${interval}&range=${range}`;
+        const url = `${YAHOO_CHART}/${code}${suffix}?interval=${interval}&range=${range}&events=div`;
         const json = await fetchJson(url);
         const result = json?.chart?.result?.[0];
         if (!result?.timestamp?.length) {
@@ -260,12 +264,22 @@ export async function historyHandler(query) {
           // Yahoo 會夾帶收盤價為 null 的空列（停牌或資料缺漏），保留會讓指標計算出錯。
           .filter((c) => c.close !== null);
 
+        // Yahoo 以除息日的時間戳為鍵，值為每股配息金額（現金股利）。
+        const dividends = Object.values(result.events?.dividends ?? {})
+          .map((ev) => ({
+            date: new Date(ev.date * 1000).toISOString().slice(0, 10),
+            amount: ev.amount,
+          }))
+          .filter((d) => Number.isFinite(d.amount) && d.amount > 0)
+          .sort((a, b) => a.date.localeCompare(b.date));
+
         return {
           code,
           symbol: `${code}${suffix}`,
           market: suffix === '.TWO' ? 'OTC' : 'TSE',
           currency: result.meta?.currency ?? 'TWD',
           candles,
+          dividends,
           fetchedAt: new Date().toISOString(),
         };
       } catch (err) {

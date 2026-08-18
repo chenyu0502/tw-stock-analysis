@@ -100,6 +100,8 @@ export default function PnlCalendar({ curve }) {
             return (
               <div
                 key={cell.date}
+                // 格子只顯示到千位，對帳時需要完整金額，滑鼠停留即可看到。
+                title={hasData ? `${cell.date}　${money(cell.pnl)}` : undefined}
                 className={`rounded border p-1 text-center ${
                   hasData ? 'border-slate-800 bg-slate-900/60' : 'border-transparent'
                 }`}
