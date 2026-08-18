@@ -24,6 +24,8 @@ const RECENT_WINDOW = 20;
  * @param {object} [params.institutional] 當日三大法人買賣超
  * @param {object[]} [params.chipSeries] 法人買賣超歷史序列，中線判斷需要
  * @param {object} [params.margin] 融資融券
+ * @param {object} [params.fundamentals] /api/fundamentals 的結果，供估值解讀
+ * @param {object[]} [params.risks] detectRisks() 的結果，供風險綜述
  * @returns {object|null} 資料不足時回傳 null
  */
 export function buildAnalysisInput({
@@ -36,6 +38,8 @@ export function buildAnalysisInput({
   institutional,
   chipSeries,
   margin,
+  fundamentals,
+  risks,
 }) {
   if (!candles || candles.length < 60) return null;
 
@@ -111,7 +115,48 @@ export function buildAnalysisInput({
           dividendYield: valuation.dividendYield,
         }
       : null,
+    fundamentals: buildFundamentalSummary(fundamentals),
+    // 風險由 detectRisks() 依固定門檻算出，模型只負責串成敘述，不得自行新增項目。
+    risks: Array.isArray(risks)
+      ? risks.map((r) => ({ category: r.category, severity: r.severity, message: r.message }))
+      : null,
     chips: buildChipSummary({ institutional, chipSeries, margin }),
+  };
+}
+
+/**
+ * 壓縮基本面資料，只留模型敘述時真正用得到的欄位。
+ *
+ * 完整的 /api/fundamentals 回應含分位帶的四分位、月營收序列與六年股利明細，
+ * 那些是給圖表用的。全部送進提示詞只會膨脹 token，也增加模型從中挑數字的機會。
+ *
+ * @param {object|null} f
+ * @returns {object|null}
+ */
+function buildFundamentalSummary(f) {
+  if (!f?.available) return null;
+
+  const band = (b) =>
+    b ? { current: b.current, percentile: b.percentile, median: b.median, samples: b.samples } : null;
+
+  return {
+    pe: band(f.bands?.pe),
+    pb: band(f.bands?.pb),
+    dividendYield: band(f.bands?.dividendYield),
+    epsTtm: f.income?.epsTtm ?? null,
+    roe: f.roe?.value ?? null,
+    margins: f.income?.margins ?? null,
+    marginsYearAgo: f.income?.marginsYearAgo ?? null,
+    revenueYoy: f.revenue?.yoy ?? null,
+    revenueYoy3m: f.revenue?.yoy3m ?? null,
+    debtRatio: f.balance?.debtRatio ?? null,
+    dividend: f.dividend
+      ? {
+          latestCash: f.dividend.latestCash,
+          consecutiveCashYears: f.dividend.consecutiveCashYears,
+          payoutRatio: f.dividend.payoutRatio,
+        }
+      : null,
   };
 }
 

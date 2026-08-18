@@ -14,17 +14,29 @@ const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 export const DEFAULT_MODEL = 'gemini-3.7-flash';
 
 /**
- * 模型退役時的回退對象。
+ * 依序嘗試的備援模型。
  *
- * Google 會讓舊模型「仍列在模型清單中，但對新使用者回傳 404」。
- * 實測 gemini-2.5 系列就是這個狀態，光看清單無法察覺，直到實際呼叫才會失敗。
- * 這個別名永遠指向當前的 flash 模型，用來把硬性中斷變成可用的降級。
+ * 兩種情況會往下換：
+ *
+ * 1. **模型退役。** Google 會讓舊模型「仍列在清單中，但對新使用者回傳 404」。
+ *    實測 gemini-2.5 系列就是這個狀態，光看清單無法察覺，直到實際呼叫才會失敗。
+ * 2. **配額用盡。** 免費層是**每個模型每天各自計算**——實測 gemini-3.7-flash
+ *    每日 20 次，用完後回 429，但 gemini-3.6-flash 仍然可用。
+ *
+ * 順序的理由：gemini-3.6-flash 是真正不同的模型，有自己的額度桶；
+ * gemini-flash-latest 是別名，配額用盡時它指向的往往就是剛失敗的那一個，
+ * 但在「主要模型退役」時它是唯一保證有效的目標，因此放在最後當安全網。
  */
-const FALLBACK_MODEL = 'gemini-flash-latest';
+const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
 
 /** 判斷錯誤是否為模型不可用，這種情況重試同一個模型沒有意義。 */
 function isModelUnavailable(message) {
   return /no longer available|not found|is not supported/i.test(message);
+}
+
+/** 判斷錯誤是否為配額用盡。免費層按模型分別計算，換一個模型就有機會成功。 */
+function isQuotaExhausted(message) {
+  return /429|quota|RESOURCE_EXHAUSTED/i.test(message);
 }
 
 /**
@@ -40,19 +52,30 @@ function isModelUnavailable(message) {
  * @param {string} params.prompt 本次要分析的內容
  * @param {object} params.schema responseSchema 定義
  * @param {number} [params.temperature=0.2] 分析任務需要穩定輸出，預設偏低
- * @returns {Promise<object>} 解析後的 JSON
+ * @returns {Promise<{data: object, model: string}>} 解析後的 JSON 與實際使用的模型
+ *
+ * 實際使用的模型獨立回傳，不併進 data。把它混進模型的結構化輸出裡，
+ * 等於在 responseSchema 定義的結果上多長出一個欄位，
+ * 使用端就無法信任「analysis 的內容全部來自 schema」這件事。
  */
 export async function generateJson(params) {
-  const target = params.model || DEFAULT_MODEL;
-  try {
-    return await callModel(target, params);
-  } catch (err) {
-    // 指定的模型已退役時改用永遠可用的別名，讓功能降級而不是整個中斷。
-    if (target !== FALLBACK_MODEL && isModelUnavailable(err.message)) {
-      return callModel(FALLBACK_MODEL, params);
+  const primary = params.model || DEFAULT_MODEL;
+  // 已在鏈上的主要模型不重複嘗試。
+  const chain = [primary, ...FALLBACK_MODELS.filter((m) => m !== primary)];
+
+  let lastError;
+  for (const model of chain) {
+    try {
+      return { data: await callModel(model, params), model };
+    } catch (err) {
+      lastError = err;
+      // 只有「模型不可用」與「配額用盡」值得換模型。
+      // 其餘錯誤（金鑰無效、請求格式錯誤）換幾個模型都是一樣的結果，
+      // 硬換只會拖長使用者等待的時間，還把真正的原因藏在最後一個模型的訊息裡。
+      if (!isModelUnavailable(err.message) && !isQuotaExhausted(err.message)) throw err;
     }
-    throw err;
   }
+  throw lastError;
 }
 
 /**

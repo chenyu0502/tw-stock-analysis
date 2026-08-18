@@ -28,9 +28,20 @@ const SYSTEM_INSTRUCTION = `你是一位台股技術分析師，服務對象是�
 6. 判斷各週期立場時，請分別依據對應的資料：
    短線看 KD、MACD、5 日乖離、量能比與最近的支撐壓力距離；
    中線看 20 與 60 日均線關係、型態、法人近 5 日與近 20 日買賣超、融資融券；
-   長線看 120 日均線方向、現價在期間區間中的位置、本益比與股價淨值比與殖利率。
+   長線看 120 日均線方向、現價在期間區間中的位置、估值分位與獲利品質。
    對應資料缺漏時，直接說明資料不足，不要用其他週期的資料硬推。
-7. 禁止使用 emoji。`;
+7. 估值判斷的規則：
+   分位、每股盈餘、利潤率、營收年增、股東權益報酬率等數字全部由使用者提供，
+   **你不可以自行計算、推估或修改任何數字**，需要提到時只能原樣引用。
+   估值等級描述的是「相對於這檔自己的歷史區間」，不是買賣建議。
+   請說明估值水位與獲利表現之間的關係——高分位若有獲利成長支撐，
+   與高分位卻伴隨獲利衰退，意義完全不同。
+   沒有提供估值資料時（例如 ETF），等級一律填「資料不足」並說明原因。
+8. 風險綜述只能引用「已偵測風險」區塊中提供的項目，
+   **不得自行新增未列出的風險**。請說明這些項目之間的關聯，
+   以及其中哪一項最需要注意、理由是什麼。沒有提供任何項目時，
+   說明目前未觸發門檻，並提醒這不等於沒有風險。
+9. 禁止使用 emoji。`;
 
 /**
  * 單一時間週期的立場定義。
@@ -96,6 +107,26 @@ const RESPONSE_SCHEMA = {
       },
       required: ['short', 'medium', 'long'],
     },
+    valuation: {
+      type: 'object',
+      description: '估值解讀。等級描述相對於自己歷史區間的水位，不是買賣建議。',
+      properties: {
+        level: { type: 'string', enum: ['偏高', '中性', '偏低', '資料不足'] },
+        basis: {
+          type: 'string',
+          description:
+            '依據，須引用提供的分位與獲利數字，並說明估值水位與獲利表現的關係，八十字以內',
+        },
+        watch: { type: 'string', description: '什麼情況下這個判斷會改變，四十字以內' },
+      },
+      required: ['level', 'basis', 'watch'],
+    },
+    riskSummary: {
+      type: 'string',
+      description:
+        '把「已偵測風險」的項目串成一段，說明彼此關聯與哪一項最需要注意。' +
+        '只能引用提供的項目，不可新增。無項目時說明未觸發門檻。一百二十字以內',
+    },
     summary: { type: 'string', description: '整體技術面結論，八十字以內' },
     risks: {
       type: 'array',
@@ -103,7 +134,17 @@ const RESPONSE_SCHEMA = {
       items: { type: 'string' },
     },
   },
-  required: ['pattern', 'levelNotes', 'keyLevel', 'scenarios', 'timeframes', 'summary', 'risks'],
+  required: [
+    'pattern',
+    'levelNotes',
+    'keyLevel',
+    'scenarios',
+    'timeframes',
+    'valuation',
+    'riskSummary',
+    'summary',
+    'risks',
+  ],
 };
 
 /**
@@ -125,7 +166,8 @@ function fmt(value) {
  * @returns {string}
  */
 function buildPrompt(input) {
-  const { code, name, price, levels, indicators, recent, valuation, chips } = input;
+  const { code, name, price, levels, indicators, recent, valuation, chips, fundamentals, risks } =
+    input;
 
   const levelLines = [
     ...levels.resistances.map(
@@ -169,31 +211,109 @@ ATR(14)：${fmt(indicators.atr)}
 近 20 日漲跌：${fmt(recent.change20)}%
 近 5 日均量與近 20 日均量比：${fmt(recent.volumeRatio)}
 
-${buildValuationBlock(valuation)}
+${buildValuationBlock(valuation, fundamentals)}
 
 ${buildChipBlock(chips)}
+
+${buildRiskBlock(risks)}
 
 請依上述資料完成以下工作：
 1. 判斷目前的價格型態。
 2. 解讀每個支撐壓力價位的意義。
 3. 分別給出短線、中線、長線的技術面立場，各自說明依據與觀察條件。
+4. 判斷估值水位，並說明它與獲利表現之間的關係。
+5. 把已偵測風險串成一段綜述，指出哪一項最需要注意。
 
-再次提醒：只能引用上方提供的數字，不可自行產生任何價格。
-操作立場只描述技術面狀態，不得給出買賣指令、目標價或停損價。`;
+再次提醒：只能引用上方提供的數字，不可自行產生或計算任何數字。
+估值等級是相對自己歷史區間的描述，風險綜述只能引用已列出的項目。
+所有結論都不得包含買賣指令、目標價或停損價。`;
 }
 
 /**
- * 估值區塊。缺資料時明確寫出，讓模型知道長線判斷少了哪一塊，
- * 而不是留白讓它自行想像。
- * @param {object|null} valuation
+ * 估值與基本面區塊。
+ *
+ * 有深度資料時一律優先採用：分位帶告訴模型「目前貴不貴是相對自己而言」，
+ * 利潤率與營收年增則讓它能判斷這個估值水位有沒有獲利支撐。
+ * 只給當下的本益比數字，模型無從判斷那是高是低，只會憑印象亂猜。
+ *
+ * 缺資料時明確寫出，讓模型知道長線判斷少了哪一塊，而不是留白讓它自行想像。
+ *
+ * @param {object|null} valuation /api/valuation 的當下快照
+ * @param {object|null} fundamentals 壓縮後的深度基本面
  * @returns {string}
  */
-function buildValuationBlock(valuation) {
-  if (!valuation) return '【估值】無資料（長線判斷請說明缺少估值依據）';
-  return `【估值】
+function buildValuationBlock(valuation, fundamentals) {
+  if (!fundamentals) {
+    if (!valuation) {
+      return '【估值與基本面】無資料（估值等級請填「資料不足」並說明原因）';
+    }
+    return `【估值與基本面】僅有當下數值，無歷史分位可比較
 本益比：${fmt(valuation.peRatio)}
 股價淨值比：${fmt(valuation.pbRatio)}
 現金殖利率：${fmt(valuation.dividendYield)}%`;
+  }
+
+  const band = (label, b, unit = '') => {
+    if (!b) return `${label}：無資料`;
+    return (
+      `${label}：${fmt(b.current)}${unit}` +
+      `（位於自己過去 ${b.samples} 個交易日的 ${fmt(b.percentile)}% 分位，中位數 ${fmt(b.median)}${unit}）`
+    );
+  };
+
+  const lines = [
+    '【估值與基本面】分位為「目前值高於過去多少比例的交易日」',
+    band('本益比', fundamentals.pe, ' 倍'),
+    band('股價淨值比', fundamentals.pb, ' 倍'),
+    band('現金殖利率', fundamentals.dividendYield, '%'),
+  ];
+
+  const m = fundamentals.margins;
+  const ago = fundamentals.marginsYearAgo;
+  if (m) {
+    const withAgo = (now, before) =>
+      ago && Number.isFinite(before) ? `${fmt(now)}%（去年同期 ${fmt(before)}%）` : `${fmt(now)}%`;
+    lines.push(
+      `毛利率：${withAgo(m.gross, ago?.gross)}`,
+      `營業利益率：${withAgo(m.operating, ago?.operating)}`,
+      `淨利率：${withAgo(m.net, ago?.net)}`
+    );
+  }
+  lines.push(
+    `每股盈餘（近四季合計）：${fmt(fundamentals.epsTtm)}`,
+    `股東權益報酬率：${fmt(fundamentals.roe)}%`,
+    `月營收年增率：單月 ${fmt(fundamentals.revenueYoy)}%，近三月 ${fmt(fundamentals.revenueYoy3m)}%`,
+    `負債比：${fmt(fundamentals.debtRatio)}%`
+  );
+  if (fundamentals.dividend) {
+    const d = fundamentals.dividend;
+    lines.push(
+      `現金股利：${fmt(d.latestCash)} 元，已連續配發 ${d.consecutiveCashYears} 年` +
+        (Number.isFinite(d.payoutRatio) ? `，配發率 ${fmt(d.payoutRatio)}%` : '')
+    );
+  }
+  return lines.join('\n');
+}
+
+/**
+ * 已偵測風險區塊。
+ *
+ * 這些項目由 src/lib/risks.js 依固定門檻算出，每一項都附帶觸發它的實際數值。
+ * 模型的工作只是說明彼此的關聯與輕重，不是重新判斷有沒有風險——
+ * 那樣會得到每次都不一樣、也無從查核的清單。
+ *
+ * @param {object[]|null} risks
+ * @returns {string}
+ */
+function buildRiskBlock(risks) {
+  if (!Array.isArray(risks) || risks.length === 0) {
+    return '【已偵測風險】無。目前沒有任何項目達到門檻（這不等於沒有風險，請於綜述中說明）';
+  }
+  const label = { high: '高', medium: '中', low: '低' };
+  return [
+    '【已偵測風險】由程式依固定門檻判定，僅能引用以下項目，不得新增',
+    ...risks.map((r) => `（${label[r.severity] ?? '中'}）${r.category}：${r.message}`),
+  ].join('\n');
 }
 
 /**
@@ -241,7 +361,14 @@ function describeError(err) {
     return 'Gemini 服務目前忙碌，已自動重試仍未成功。請稍候再點一次分析。';
   }
   if (/429|quota|RESOURCE_EXHAUSTED/i.test(message)) {
-    return 'Gemini API 配額已用盡，請稍後再試，或到 Google AI Studio 檢視用量。';
+    // 免費層每個模型每天各自計算，實測 gemini-3.7-flash 為每日 20 次。
+    // 走到這裡代表備援模型也都用完了，講清楚是「今天用完」而不是「稍後再試」——
+    // 後者會讓使用者一直重按，卻要等到隔天才會成功。
+    return (
+      'Gemini 今日免費額度已用盡（免費層每個模型每天各自計算，' +
+      '主要與備援模型都已達上限）。可等隔日重置，或到 Google AI Studio 啟用付費方案。' +
+      '上方的估值分位、獲利結構與風險提示不受影響，那些是程式計算的。'
+    );
   }
   if (/API key|API_KEY_INVALID|401|403|PERMISSION/i.test(message)) {
     return 'Gemini 金鑰無效或權限不足，請確認 GEMINI_API_KEY 設定正確。';
@@ -310,8 +437,10 @@ export async function analyzeHandler(input, env = {}) {
     body: {
       available: true,
       code,
-      model: env.GEMINI_MODEL || undefined,
-      analysis: result,
+      // 實際使用的模型。配額用盡或模型退役時會自動改用備援，
+      // 使用者看到的敘述可能出自不同模型，這個欄位讓那件事是可見的。
+      model: result.model,
+      analysis: result.data,
       // 一併回傳送出的價位，讓介面能把模型的敘述與實際數字對照，
       // 也方便日後查核模型有沒有自行捏造價格。
       levels: { supports: levels.supports, resistances: levels.resistances },

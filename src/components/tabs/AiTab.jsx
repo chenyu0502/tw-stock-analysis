@@ -115,8 +115,21 @@ export default function AiTab() {
       institutional: institutionalMap[code],
       chipSeries: chipHistoryMap[code]?.series,
       margin: marginMap[code],
+      // 基本面在這裡就壓縮成模型需要的欄位，不把整包回應（含四分位、
+      // 十二個月營收序列、六年股利明細）送進提示詞。
+      fundamentals: fundamentalsMap[code],
     });
-  }, [selected, candles, code, nameOf, valuationMap, institutionalMap, chipHistoryMap, marginMap]);
+  }, [
+    selected,
+    candles,
+    code,
+    nameOf,
+    valuationMap,
+    institutionalMap,
+    chipHistoryMap,
+    marginMap,
+    fundamentalsMap,
+  ]);
 
   const fundamentals = fundamentalsMap[code] ?? null;
 
@@ -134,12 +147,18 @@ export default function AiTab() {
     [fundamentals, input, chipHistoryMap, code, exDividendMap]
   );
 
+  // 送給模型的完整內容。模型只負責敘述，數字在這裡就已經全部定案。
+  //
+  // 風險清單另外合併進來，因為它要用到 input 的指標，
+  // 沒辦法在產生 input 的同一個 useMemo 內自我相依。
+  const payload = useMemo(() => (input ? { ...input, risks } : null), [input, risks]);
+
   async function handleAnalyze() {
-    if (!input) return;
+    if (!payload) return;
     setLoading(true);
     setError('');
     try {
-      const data = await fetchAnalysis(input);
+      const data = await fetchAnalysis(payload);
       setResult(data);
     } catch (err) {
       setError(err.message);
@@ -177,7 +196,7 @@ export default function AiTab() {
         <button
           type="button"
           onClick={handleAnalyze}
-          disabled={!input || loading}
+          disabled={!payload || loading}
           className="flex items-center gap-1.5 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-500 disabled:opacity-40"
         >
           {loading ? <RefreshCw size={15} className="animate-spin" /> : <Sparkles size={15} />}
@@ -187,6 +206,9 @@ export default function AiTab() {
         {result?.generatedAt && (
           <span className="text-xs text-slate-600">
             產生於 {new Date(result.generatedAt).toLocaleString('zh-TW')}
+            {/* 配額用盡或模型退役時會自動改用備援模型，敘述的風格與品質可能不同，
+                因此把實際使用的模型顯示出來，而不是讓它默默換掉。 */}
+            {result.model && <span className="ml-1.5">· {result.model}</span>}
           </span>
         )}
       </div>
@@ -298,6 +320,38 @@ export default function AiTab() {
             </Panel>
           )}
 
+          {analysis.valuation && (
+            <Panel
+              title="估值解讀"
+              note="等級描述的是相對於這檔自己歷史區間的水位，不是買賣建議。數字全部取自上方的估值分位，模型不產生任何數值。"
+            >
+              <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
+                <span
+                  className={`rounded border px-2 py-0.5 text-xs ${
+                    VALUATION_STYLE[analysis.valuation.level] ?? VALUATION_STYLE['資料不足']
+                  }`}
+                >
+                  {analysis.valuation.level}
+                </span>
+                <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
+                  {analysis.valuation.basis}
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-sky-400/80">
+                  觀察：{analysis.valuation.watch}
+                </p>
+              </div>
+            </Panel>
+          )}
+
+          {analysis.riskSummary && (
+            <Panel
+              title="風險綜述"
+              note="把上方依門檻偵測到的風險串成一段，只引用已列出的項目，不新增"
+            >
+              <p className="text-sm leading-relaxed text-slate-300">{analysis.riskSummary}</p>
+            </Panel>
+          )}
+
           <Panel title="關鍵價位">
             <p className="text-sm leading-relaxed text-slate-300">{analysis.keyLevel}</p>
           </Panel>
@@ -332,6 +386,19 @@ export default function AiTab() {
     </div>
   );
 }
+
+/**
+ * 估值等級的顏色。
+ *
+ * 刻意不用紅綠：紅漲綠跌在台股是價格方向的慣例，套在估值上會被讀成
+ * 「紅色＝好」。估值高低不等於好壞，因此改用中性的琥珀與天藍。
+ */
+const VALUATION_STYLE = {
+  偏高: 'border-amber-500/40 bg-amber-500/10 text-amber-400',
+  中性: 'border-slate-600/50 bg-slate-700/20 text-slate-300',
+  偏低: 'border-sky-500/40 bg-sky-500/10 text-sky-400',
+  資料不足: 'border-slate-700/50 bg-slate-800/40 text-slate-500',
+};
 
 /** 風險嚴重度的顏色。沿用警示慣例，與台股漲跌色無關。 */
 const SEVERITY_COLOR = {
