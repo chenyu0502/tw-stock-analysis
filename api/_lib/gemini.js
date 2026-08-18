@@ -41,8 +41,15 @@ const TOTAL_BUDGET_MS = 50000;
 /** 一個模型至少要有這麼多時間才值得嘗試，否則不如把錯誤如實回報。 */
 const MIN_MODEL_ATTEMPT_MS = 6000;
 
-/** 單一模型的最長等待。實測一次生成約十至二十秒，超過多半是上游卡住。 */
-const PER_MODEL_TIMEOUT_MS = 28000;
+/**
+ * 單一模型的最長等待。
+ *
+ * 實測正式環境一次成功的生成約需 29 秒——輸出有九個欄位、內容是中文長句，
+ * 本來就不快。這個值一度設為 28 秒，結果把還在正常工作的請求切斷，
+ * 使用者看到的是「逾時」而不是結果。門檻必須高於實際生成時間，
+ * 只用來擋住真正卡住的連線。
+ */
+const PER_MODEL_TIMEOUT_MS = 40000;
 
 /** 判斷錯誤是否為模型不可用，這種情況重試同一個模型沒有意義。 */
 function isModelUnavailable(message) {
@@ -52,6 +59,16 @@ function isModelUnavailable(message) {
 /** 判斷錯誤是否為配額用盡。免費層按模型分別計算，換一個模型就有機會成功。 */
 function isQuotaExhausted(message) {
   return /429|quota|RESOURCE_EXHAUSTED/i.test(message);
+}
+
+/**
+ * 判斷錯誤是否為逾時或上游忙碌。
+ *
+ * 這兩種都是「這個模型現在不行」，換一個模型有真正的機會成功。
+ * 剩餘預算不足時外層會自行停手，因此不必擔心無止境地換下去。
+ */
+function isTransient(message) {
+  return /abort|timeout|逾時|50[023]|overload|UNAVAILABLE/i.test(message);
 }
 
 /**
@@ -91,10 +108,12 @@ export async function generateJson(params) {
       return { data: await callModel(model, { ...params, deadline }), model };
     } catch (err) {
       lastError = err;
-      // 只有「模型不可用」與「配額用盡」值得換模型。
+      // 模型不可用、配額用盡、逾時或忙碌都值得換一個模型試試。
       // 其餘錯誤（金鑰無效、請求格式錯誤）換幾個模型都是一樣的結果，
       // 硬換只會拖長使用者等待的時間，還把真正的原因藏在最後一個模型的訊息裡。
-      if (!isModelUnavailable(err.message) && !isQuotaExhausted(err.message)) throw err;
+      const worthRetrying =
+        isModelUnavailable(err.message) || isQuotaExhausted(err.message) || isTransient(err.message);
+      if (!worthRetrying) throw err;
     }
   }
   throw lastError;
@@ -129,9 +148,11 @@ async function callModel(
       },
     }),
     timeoutMs: PER_MODEL_TIMEOUT_MS,
-    // 只重試一次。有備援模型可用時，換一個模型比反覆敲同一個忙碌的模型划算，
-    // 而且預算有限——重試三次會把時間全部吃掉，一個備援都輪不到。
-    retries: 1,
+    // 不重試同一個模型：備援鏈本身就是重試，而且是更好的重試。
+    // 對忙碌或已無額度的模型再敲一次多半還是失敗，卻要付出一次完整的等待；
+    // 換一個模型則有真正的機會成功。生成逾時更不該重試——
+    // 慢代表它需要更多時間，再送一次只會更慢。
+    retries: 0,
     deadline,
   });
 
