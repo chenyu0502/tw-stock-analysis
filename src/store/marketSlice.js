@@ -27,6 +27,15 @@ export const loadInstitutionalHistory = createAsyncThunk(
   }
 );
 
+/** 載入單檔的基本面深度指標。伺服器快取 24 小時，前端只在未載入時取用。 */
+export const loadFundamentals = createAsyncThunk(
+  'market/loadFundamentals',
+  async ({ code }) => {
+    const data = await api.fetchFundamentals(code);
+    return { code, data };
+  }
+);
+
 /** 一次載入融資融券、三大法人、估值三項每日更新的資料。 */
 export const loadDailyStats = createAsyncThunk('market/loadDailyStats', async (codes) => {
   // 三個端點互不相依，並行取用。任一失敗不應拖垮其他兩項，因此用 allSettled。
@@ -50,7 +59,9 @@ const initialState = {
   /** 各檔的法人買賣超歷史，鍵為代號，值為 { available, series, reason } */
   institutionalHistory: {},
   valuation: {},
-  loading: { quotes: false, history: false, daily: false, chips: false },
+  /** 各檔的基本面深度指標，鍵為代號，值為 { available, bands, revenue, income, ... } */
+  fundamentals: {},
+  loading: { quotes: false, history: false, daily: false, chips: false, fundamentals: false },
   error: null,
   lastQuoteAt: null,
 };
@@ -88,6 +99,23 @@ const marketSlice = createSlice({
       .addCase(loadHistory.rejected, (state, action) => {
         state.loading.history = false;
         state.error = action.error.message;
+      })
+
+      .addCase(loadFundamentals.pending, (state) => {
+        state.loading.fundamentals = true;
+      })
+      .addCase(loadFundamentals.fulfilled, (state, action) => {
+        state.loading.fundamentals = false;
+        state.fundamentals[action.payload.code] = action.payload.data;
+      })
+      .addCase(loadFundamentals.rejected, (state, action) => {
+        state.loading.fundamentals = false;
+        // 基本面屬於加值資訊，取不到時記錄於該檔自身，
+        // 不寫進全域 error，避免蓋掉更重要的報價錯誤訊息。
+        state.fundamentals[action.meta.arg.code] = {
+          available: false,
+          reason: action.error.message,
+        };
       })
 
       .addCase(loadInstitutionalHistory.pending, (state) => {

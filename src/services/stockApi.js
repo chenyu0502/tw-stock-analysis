@@ -86,6 +86,16 @@ export function fetchValuation(codes) {
 }
 
 /**
+ * 取得單檔的基本面深度指標：估值分位帶、月營收年增、利潤率、ROE、股利紀錄。
+ *
+ * 全部由伺服器以程式計算，不經過語言模型。
+ * @param {string} code
+ */
+export function fetchFundamentals(code) {
+  return callApi('fundamentals', { code });
+}
+
+/**
  * 取得全市場代號名稱對照表。資料量約 2000 筆，載入後應快取於記憶體。
  */
 export function fetchUniverse() {

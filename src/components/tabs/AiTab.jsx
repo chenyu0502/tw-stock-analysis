@@ -6,11 +6,15 @@ import {
   loadQuotes,
   loadDailyStats,
   loadInstitutionalHistory,
+  loadFundamentals,
 } from '../../store/marketSlice.js';
 import { buildAnalysisInput } from '../../lib/analysisInput.js';
+import { detectRisks } from '../../lib/risks.js';
 import { fetchAnalysis } from '../../services/stockApi.js';
 import { DEFAULT_MA } from '../../store/portfolioSlice.js';
+import { num, pct, int } from '../../lib/format.js';
 import LevelLadder from '../LevelLadder.jsx';
+import ValuationBands from '../ValuationBands.jsx';
 
 /**
  * AI 頁：型態分析與支撐壓力區間推估。
@@ -26,6 +30,8 @@ export default function AiTab() {
   const institutionalMap = useSelector((s) => s.market.institutional);
   const marginMap = useSelector((s) => s.market.margin);
   const chipHistoryMap = useSelector((s) => s.market.institutionalHistory);
+  const fundamentalsMap = useSelector((s) => s.market.fundamentals);
+  const loadingFundamentals = useSelector((s) => s.market.loading.fundamentals);
 
   // 分析頁與持股頁的標的合併成一份清單，同一檔只出現一次。
   const targets = useMemo(() => {
@@ -81,7 +87,9 @@ export default function AiTab() {
     if (!code) return;
     if (!history[code]) dispatch(loadHistory({ code, range: '1y' }));
     if (!chipHistoryMap[code]) dispatch(loadInstitutionalHistory({ code, days: 30 }));
-  }, [code, history, chipHistoryMap, dispatch]);
+    // 基本面一檔要打五個 FinMind 資料集，伺服器快取一天，前端也只在未載入時取用。
+    if (!fundamentalsMap[code]) dispatch(loadFundamentals({ code }));
+  }, [code, history, chipHistoryMap, fundamentalsMap, dispatch]);
 
   // 切換標的時清掉上一檔的結果，避免看到別檔的分析卻以為是這檔的。
   useEffect(() => {
@@ -105,6 +113,21 @@ export default function AiTab() {
       margin: marginMap[code],
     });
   }, [selected, candles, code, nameOf, valuationMap, institutionalMap, chipHistoryMap, marginMap]);
+
+  const fundamentals = fundamentalsMap[code] ?? null;
+
+  // 規則型風險清單。純計算，不呼叫 AI，因此不需要按任何按鈕就能顯示。
+  const risks = useMemo(
+    () =>
+      detectRisks({
+        fundamentals: fundamentals?.available ? fundamentals : null,
+        indicators: input?.indicators,
+        recent: input?.recent,
+        chips: input?.chips,
+        chipSeries: chipHistoryMap[code]?.series ?? [],
+      }),
+    [fundamentals, input, chipHistoryMap, code]
+  );
 
   async function handleAnalyze() {
     if (!input) return;
@@ -194,6 +217,52 @@ export default function AiTab() {
         </Panel>
       )}
 
+      {/* 估值與基本面。純計算，不依賴模型，因此不必按「開始分析」就會出現。 */}
+      <Panel
+        title="估值分位"
+        note="以這檔自己近五年的區間為基準，不與其他標的比較。全部由程式計算，不經過 AI。"
+      >
+        {loadingFundamentals && !fundamentals ? (
+          <div className="py-6 text-center text-sm text-slate-500">載入基本面資料中…</div>
+        ) : fundamentals?.available === false ? (
+          <div className="py-6 text-center text-sm text-slate-500">{fundamentals.reason}</div>
+        ) : (
+          <ValuationBands bands={fundamentals?.bands} />
+        )}
+      </Panel>
+
+      {fundamentals?.available && <FundamentalStats data={fundamentals} />}
+
+      <Panel
+        title="風險提示"
+        note="依固定門檻逐條檢查，每一項都附上觸發的實際數值。不經過 AI，同樣的資料一定得到同樣的結果。"
+      >
+        {risks.length === 0 ? (
+          <div className="py-6 text-center text-sm text-slate-500">
+            目前沒有觸發任何風險條件。這不代表沒有風險，只代表這份清單涵蓋的項目都未達門檻。
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {risks.map((item) => (
+              <li key={item.id} className="flex gap-2">
+                <AlertTriangle
+                  size={13}
+                  className={`mt-0.5 shrink-0 ${SEVERITY_COLOR[item.severity]}`}
+                />
+                <div className="min-w-0">
+                  <span
+                    className={`mr-1.5 rounded px-1 py-0.5 text-[10px] ${SEVERITY_BADGE[item.severity]}`}
+                  >
+                    {item.category}
+                  </span>
+                  <span className="text-xs leading-relaxed text-slate-300">{item.message}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
+
       {analysis && (
         <>
           <Panel title="型態分析">
@@ -239,7 +308,7 @@ export default function AiTab() {
             <p className="text-sm leading-relaxed text-slate-300">{analysis.summary}</p>
           </Panel>
 
-          <Panel title="風險與盲點">
+          <Panel title="AI 判讀的盲點" note="模型自行提出的疑慮，與上方依門檻計算的風險提示不同">
             <ul className="space-y-1.5">
               {analysis.risks.map((risk) => (
                 <li key={risk} className="flex gap-2 text-xs leading-relaxed text-slate-400">
@@ -255,6 +324,121 @@ export default function AiTab() {
           </p>
         </>
       )}
+    </div>
+  );
+}
+
+/** 風險嚴重度的顏色。沿用警示慣例，與台股漲跌色無關。 */
+const SEVERITY_COLOR = {
+  high: 'text-rose-500',
+  medium: 'text-amber-500',
+  low: 'text-slate-500',
+};
+const SEVERITY_BADGE = {
+  high: 'bg-rose-950/60 text-rose-400',
+  medium: 'bg-amber-950/60 text-amber-400',
+  low: 'bg-slate-800 text-slate-400',
+};
+
+/**
+ * 獲利能力與財務結構。
+ *
+ * 每一項都附上「去年同期」作為對照。單一個孤立的毛利率數字看不出好壞，
+ * 有了同期比較才知道是在改善還是在惡化。
+ */
+function FundamentalStats({ data }) {
+  const { income, balance, roe, revenue, dividend } = data;
+  const margins = income?.margins;
+  const marginsAgo = income?.marginsYearAgo;
+
+  // 只列出真的有資料的項目。ETF 沒有財報，把整排「—」擺出來只是佔版面，
+  // 還會讓人以為是載入失敗；配息紀錄則是 ETF 唯一也最該看的一項，必須保留。
+  const stats = [
+    Number.isFinite(income?.epsTtm) && {
+      key: 'eps',
+      label: '每股盈餘 TTM',
+      value: num(income.epsTtm, 2),
+    },
+    roe && {
+      key: 'roe',
+      label: '股東權益報酬率',
+      value: pct(roe.value, 1),
+      sub: roe.averaged ? '期初期末平均' : '期末權益',
+    },
+    Number.isFinite(margins?.gross) && {
+      key: 'gross',
+      label: '毛利率',
+      value: pct(margins.gross, 1),
+      sub: compare(margins.gross, marginsAgo?.gross),
+    },
+    Number.isFinite(margins?.operating) && {
+      key: 'op',
+      label: '營業利益率',
+      value: pct(margins.operating, 1),
+      sub: compare(margins.operating, marginsAgo?.operating),
+    },
+    Number.isFinite(margins?.net) && {
+      key: 'net',
+      label: '淨利率',
+      value: pct(margins.net, 1),
+      sub: compare(margins.net, marginsAgo?.net),
+    },
+    Number.isFinite(balance?.debtRatio) && {
+      key: 'debt',
+      label: '負債比',
+      value: pct(balance.debtRatio, 1),
+      sub: balance.period,
+    },
+    Number.isFinite(revenue?.yoy) && {
+      key: 'revenue',
+      label: '月營收年增',
+      value: pct(revenue.yoy, 1, true),
+      sub: `${revenue.latestMonth}　近三月 ${pct(revenue.yoy3m, 1, true)}`,
+    },
+    dividend && {
+      key: 'dividend',
+      label: '現金股利',
+      value: num(dividend.latestCash, 2),
+      sub:
+        `${dividend.latestYear} 年　連續配發 ${int(dividend.consecutiveCashYears)} 年` +
+        (Number.isFinite(dividend.payoutRatio) ? `　配發率 ${pct(dividend.payoutRatio, 0)}` : ''),
+    },
+  ].filter(Boolean);
+
+  if (stats.length === 0) return null;
+
+  return (
+    <Panel
+      title="獲利與財務結構"
+      note={
+        income?.latestQuarter
+          ? `財報為單季數，最新一期 ${income.latestQuarter}。每股盈餘取近四季合計（TTM）。`
+          : '此標的無財報資料，僅顯示可取得的項目'
+      }
+    >
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {stats.map((s) => (
+          <Stat key={s.key} label={s.label} value={s.value} sub={s.sub} />
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+/** 與去年同期的差距，用於利潤率的對照文字。 */
+function compare(now, before) {
+  if (!Number.isFinite(now) || !Number.isFinite(before)) return undefined;
+  const diff = now - before;
+  const sign = diff > 0 ? '+' : '';
+  return `去年同期 ${before.toFixed(1)}%（${sign}${diff.toFixed(1)}）`;
+}
+
+function Stat({ label, value, sub }) {
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2.5">
+      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className="tabular mt-0.5 text-sm font-semibold text-slate-100">{value}</div>
+      {sub && <div className="text-[10px] leading-tight text-slate-600">{sub}</div>}
     </div>
   );
 }
