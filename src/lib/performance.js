@@ -248,10 +248,15 @@ export function aggregateByYear(curve) {
       netFlow: 0,
       startNetWorth: row.netWorth - row.pnl - row.netFlow,
       endNetWorth: 0,
+      // 該年度實際涵蓋的起訖日。統計起算日設在年中時，這一列並非整年，
+      // 介面必須標示出來，否則會被誤讀成全年報酬。
+      firstDate: row.date,
+      lastDate: row.date,
     };
     entry.pnl += row.pnl;
     entry.netFlow += row.netFlow;
     entry.endNetWorth = row.netWorth;
+    entry.lastDate = row.date;
     map.set(year, entry);
   }
 
@@ -274,6 +279,8 @@ export function aggregateByYear(curve) {
       returnPercent,
       cumulativePnl,
       cumulativeReturnPercent: (chained - 1) * 100,
+      // 未從 1 月 1 日起算即為不完整年度。
+      partial: entry.firstDate > `${entry.year}-01-05`,
     };
   });
 }

@@ -230,7 +230,7 @@ export default function PerformanceTab() {
           label="當月損益"
           value={money(monthPnl)}
           tone={monthPnl}
-          sub={monthPartial ? `僅涵蓋 ${curveStart} 起` : (currentMonth ?? '')}
+          sub={monthPartial ? `自 ${curveStart} 起` : (currentMonth ?? '')}
         />
         <Summary
           label="總損益"
@@ -313,10 +313,20 @@ export default function PerformanceTab() {
 
       {monthPartial && !useSnapshots && (
         <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-xs text-slate-400">
-          損益走勢的統計區間自 <span className="tabular">{curveStart}</span> 起算，
-          那是最早一筆交易紀錄或持股建倉日。此日之前的損益不在下方的月曆、月走勢與歷年績效中。
-          若持股在更早之前就已買進且之後沒有異動，把上方的統計起算日設到那天即可回推。
-          上方的「總損益」採成本法，不受此限制。
+          {statsStartDate ? (
+            // 使用者已自行指定起算日，就不必再建議他去設定，只需說明涵蓋範圍。
+            <>
+              下方的月曆、月走勢與歷年績效自 <span className="tabular">{curveStart}</span> 起算，
+              這是你設定的統計起算日之後的第一個交易日。上方的「總損益」採成本法，涵蓋全部持有期間。
+            </>
+          ) : (
+            <>
+              損益走勢的統計區間自 <span className="tabular">{curveStart}</span> 起算，
+              那是最早一筆交易紀錄或持股建倉日。此日之前的損益不在下方的月曆、月走勢與歷年績效中。
+              若持股在更早之前就已買進且之後沒有異動，把上方的統計起算日設到那天即可回推。
+              上方的「總損益」採成本法，不受此限制。
+            </>
+          )}
         </div>
       )}
 
@@ -476,7 +486,14 @@ export default function PerformanceTab() {
               <tbody className="tabular">
                 {yearly.map((y) => (
                   <tr key={y.year} className="border-t border-slate-800/60">
-                    <td className="py-1.5 text-slate-300">{y.year}</td>
+                    <td className="py-1.5 text-slate-300">
+                      {y.year}
+                      {y.partial && (
+                        <span className="ml-1.5 rounded bg-slate-800 px-1 py-0.5 text-[10px] text-slate-500">
+                          自 {y.firstDate?.slice(5)} 起
+                        </span>
+                      )}
+                    </td>
                     <td className={`py-1.5 text-right ${changeColor(y.pnl)}`}>{money(y.pnl)}</td>
                     <td className="py-1.5 text-right text-slate-400">{money(y.endNetWorth)}</td>
                     <td className={`py-1.5 text-right ${changeColor(y.returnPercent)}`}>
