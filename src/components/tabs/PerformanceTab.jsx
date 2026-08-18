@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   BarChart,
@@ -10,13 +10,9 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from 'recharts';
-import { Upload, CalendarClock } from 'lucide-react';
+import { CalendarClock } from 'lucide-react';
 import { loadHistory, loadQuotes } from '../../store/marketSlice.js';
-import {
-  today as todayDate,
-  setStatsStartDate,
-  setWeeklySnapshots,
-} from '../../store/portfolioSlice.js';
+import { today as todayDate, setStatsStartDate } from '../../store/portfolioSlice.js';
 import {
   normalizeTransactions,
   buildEquityCurve,
@@ -26,11 +22,6 @@ import {
   positionSummary,
   todayPnl,
 } from '../../lib/performance.js';
-import {
-  parseWeeklyWorkbook,
-  monthlyFromSnapshots,
-  yearlyFromSnapshots,
-} from '../../lib/weeklyImport.js';
 import { money, pct, num, int, changeColor } from '../../lib/format.js';
 import PnlCalendar from '../PnlCalendar.jsx';
 
@@ -42,17 +33,12 @@ const MONTHS_SHOWN = 18;
  */
 export default function PerformanceTab() {
   const dispatch = useDispatch();
-  const { holdings, transactions, cashFlows, cash, statsStartDate, weeklySnapshots } = useSelector(
+  const { holdings, transactions, cashFlows, cash, statsStartDate } = useSelector(
     (s) => s.portfolio
   );
   const history = useSelector((s) => s.market.history);
   const quotes = useSelector((s) => s.market.quotes);
   const loadingHistory = useSelector((s) => s.market.loading.history);
-
-  const [importMsg, setImportMsg] = useState('');
-  const [importOptions, setImportOptions] = useState(null);
-  /** 月走勢與歷年績效的資料來源：curve 為權益曲線、snapshots 為匯入的週記帳。 */
-  const [source, setSource] = useState('auto');
 
   // 權益曲線需要歷史股價，範圍是目前持股「加上」曾經交易過但已出清的標的。
   // 只抓目前持股會讓已平倉部位在持有期間的市值被算成零，整條曲線都會失真。
@@ -101,69 +87,9 @@ export default function PerformanceTab() {
   );
 
   const curveMonthly = useMemo(() => aggregateByMonth(curve), [curve]);
-  const curveYearly = useMemo(() => aggregateByYear(curve), [curve]);
+  const yearly = useMemo(() => aggregateByYear(curve), [curve]);
   const realized = useMemo(() => realizedSummary(transactions), [transactions]);
-
-  // 試算表通常把整年的列都預先填好，未來日期的值與最後一筆相同、週損益為零。
-  // 那些列進到圖表只會產生一堆空月份，先濾掉。
-  const usableSnapshots = useMemo(() => {
-    const day = todayDate();
-    return (weeklySnapshots ?? []).filter((s) => s.date <= day);
-  }, [weeklySnapshots]);
-
-  const hasSnapshots = usableSnapshots.length > 0;
-  // auto 表示有匯入資料就優先採用，因為它涵蓋的期間比權益曲線長。
-  const activeSource = source === 'auto' ? (hasSnapshots ? 'snapshots' : 'curve') : source;
-  const useSnapshots = activeSource === 'snapshots' && hasSnapshots;
-
-  const monthly = useMemo(
-    () =>
-      (useSnapshots ? monthlyFromSnapshots(usableSnapshots) : curveMonthly).slice(-MONTHS_SHOWN),
-    [useSnapshots, usableSnapshots, curveMonthly]
-  );
-  const yearly = useMemo(
-    () => (useSnapshots ? yearlyFromSnapshots(usableSnapshots) : curveYearly),
-    [useSnapshots, usableSnapshots, curveYearly]
-  );
-
-  /** 讀取試算表並存入週記帳。多帳戶時先讓使用者選擇。 */
-  async function handleImport(e) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    setImportMsg('讀取中…');
-    setImportOptions(null);
-    try {
-      const result = await parseWeeklyWorkbook(file);
-      const accounts = Object.keys(result.accounts);
-      if (accounts.length === 0) {
-        setImportMsg(result.warnings.join('；') || '檔案中沒有可用的週記帳資料');
-        return;
-      }
-      if (accounts.length > 1) {
-        // 一份檔案含多個帳戶時不能擅自合併，兩個帳戶的成本與庫存是各自獨立的。
-        setImportOptions(result);
-        setImportMsg(`檔案含 ${accounts.length} 個帳戶，請選擇要匯入哪一個`);
-        return;
-      }
-      applyImport(result, accounts[0]);
-    } catch (err) {
-      setImportMsg(`匯入失敗：${err.message}`);
-    }
-  }
-
-  /** 套用指定帳戶的週記帳。 */
-  function applyImport(result, account) {
-    const rows = result.accounts[account];
-    dispatch(setWeeklySnapshots(rows));
-    setImportOptions(null);
-    setSource('snapshots');
-    const warn = result.warnings.length ? `　注意：${result.warnings.join('；')}` : '';
-    setImportMsg(
-      `已匯入「${account}」共 ${rows.length} 筆週記帳，` +
-        `期間 ${rows[0].date} 至 ${rows[rows.length - 1].date}${warn}`
-    );
-  }
+  const monthly = useMemo(() => curveMonthly.slice(-MONTHS_SHOWN), [curveMonthly]);
   // 帶入交易紀錄與今日日期，當日損益才能把今天成交的部位按成交價計算，
   // 而不是把整日漲跌套用在成交後的股數上。
   const today = useMemo(
@@ -245,7 +171,7 @@ export default function PerformanceTab() {
         />
       </div>
 
-      {/* 統計區間與外部資料匯入 */}
+      {/* 統計區間 */}
       <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <label className="flex items-center gap-2 text-xs text-slate-400">
@@ -267,51 +193,16 @@ export default function PerformanceTab() {
               清除
             </button>
           )}
-
-          <label className="flex cursor-pointer items-center gap-1.5 rounded border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 transition hover:border-slate-500">
-            <Upload size={13} /> 匯入週記帳試算表
-            <input type="file" accept=".xlsx,.xls" onChange={handleImport} className="hidden" />
-          </label>
-          {hasSnapshots && (
-            <button
-              type="button"
-              onClick={() => {
-                dispatch(setWeeklySnapshots([]));
-                setSource('curve');
-                setImportMsg('已清除匯入的週記帳');
-              }}
-              className="text-xs text-slate-500 underline hover:text-slate-300"
-            >
-              清除匯入資料
-            </button>
-          )}
         </div>
 
         <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
-          持股若在某日之前就已買進且之後沒有異動，把起算日設為那天，每日損益月曆即可正確回推——
-          持股數固定，缺的只是每日收盤價。留空則各持股用自己的建倉日。
-          月走勢與歷年績效要回溯更早的期間，需匯入「YYYY損益表」格式的週記帳試算表。
+          持股若在某日之前就已買進且之後沒有異動，把起算日設為那天，
+          每日損益月曆、月走勢與歷年績效即可自該日完整回推——持股數固定，缺的只是每日收盤價。
+          留空則各持股用自己的建倉日。上方的「總損益」採成本法，不受起算日影響。
         </p>
-
-        {importMsg && <p className="mt-2 text-[11px] text-sky-400">{importMsg}</p>}
-
-        {importOptions && (
-          <div className="mt-2 flex flex-wrap gap-2">
-            {Object.keys(importOptions.accounts).map((acc) => (
-              <button
-                key={acc}
-                type="button"
-                onClick={() => applyImport(importOptions, acc)}
-                className="rounded border border-sky-700 bg-sky-600/20 px-2.5 py-1 text-xs text-sky-300 transition hover:bg-sky-600/30"
-              >
-                匯入 {acc}（{importOptions.accounts[acc].length} 筆）
-              </button>
-            ))}
-          </div>
-        )}
       </section>
 
-      {monthPartial && !useSnapshots && (
+      {monthPartial && (
         <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-xs text-slate-400">
           {statsStartDate ? (
             // 使用者已自行指定起算日，就不必再建議他去設定，只需說明涵蓋範圍。
@@ -388,36 +279,10 @@ export default function PerformanceTab() {
       <Panel
         title={`每月損益走勢（近 ${MONTHS_SHOWN} 個月）`}
         note={
-          useSnapshots
-            ? `資料來源：匯入的週記帳，採試算表自己的當周損益金額。` +
-              `期間 ${usableSnapshots[0].date} 至 ${usableSnapshots[usableSnapshots.length - 1].date}`
-            : curveStart
-              ? `資料來源：權益曲線，以每日淨值變動加總並扣除資金進出。` +
-                `統計自 ${curveStart} 起，區間內累計 ${money(latest?.cumulativePnl ?? 0)}`
-              : '資料來源：權益曲線，以每日淨值變動加總並扣除資金進出'
-        }
-        action={
-          hasSnapshots && (
-            <div className="flex gap-1 text-[11px]">
-              {[
-                ['snapshots', '週記帳'],
-                ['curve', '權益曲線'],
-              ].map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setSource(key)}
-                  className={`rounded border px-2 py-0.5 transition ${
-                    activeSource === key
-                      ? 'border-sky-600 bg-sky-600/20 text-sky-300'
-                      : 'border-slate-700 text-slate-500 hover:text-slate-300'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          )
+          curveStart
+            ? `以每日淨值變動加總並扣除資金進出。統計自 ${curveStart} 起，` +
+              `區間內累計 ${money(latest?.cumulativePnl ?? 0)}`
+            : '以每日淨值變動加總並扣除資金進出'
         }
       >
         {monthly.length === 0 ? (
@@ -463,11 +328,7 @@ export default function PerformanceTab() {
       {/* 歷年績效 */}
       <Panel
         title="歷年績效總覽"
-        note={
-          useSnapshots
-            ? '資料來源：匯入的週記帳。年度損益為該年當周損益金額的加總，報酬率分母為該年度總成本，沿用試算表本身的定義'
-            : '資料來源：權益曲線。年度報酬率的分母為年初淨值加該年淨入金，未做時間加權；年中有大額入金時報酬率會被低估'
-        }
+        note="年度報酬率的分母為年初淨值加該年淨入金，未做時間加權；年中有大額入金時報酬率會被低估。累積報酬採逐年連乘"
       >
         {yearly.length === 0 ? (
           <div className="py-8 text-center text-sm text-slate-500">資料不足</div>
@@ -552,13 +413,10 @@ export default function PerformanceTab() {
   );
 }
 
-function Panel({ title, note, action, children }) {
+function Panel({ title, note, children }) {
   return (
     <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-medium text-slate-300">{title}</h3>
-        {action}
-      </div>
+      <h3 className="text-sm font-medium text-slate-300">{title}</h3>
       {note && <p className="mb-3 mt-0.5 text-[11px] leading-relaxed text-slate-600">{note}</p>}
       <div className={note ? '' : 'mt-3'}>{children}</div>
     </section>

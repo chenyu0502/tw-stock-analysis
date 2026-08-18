@@ -49,7 +49,14 @@ export function writeLocal(data) {
  * @returns {object}
  */
 export function mergePortfolio(local, cloud) {
-  const empty = { watchlist: [], holdings: [], transactions: [], cashFlows: [], cash: 0 };
+  const empty = {
+    watchlist: [],
+    holdings: [],
+    transactions: [],
+    cashFlows: [],
+    cash: 0,
+    statsStartDate: null,
+  };
   if (!cloud) return local ?? empty;
   if (!local) return cloud;
 
@@ -79,6 +86,9 @@ export function mergePortfolio(local, cloud) {
     transactions: mergeById(local.transactions, cloud.transactions),
     cashFlows: mergeById(local.cashFlows, cloud.cashFlows),
     cash: cloud.cash ?? local.cash ?? 0,
+    // 統計起算日是單一設定值，無從合併，以雲端為準。
+    // 漏掉這一項會讓登入後的同步把本機設定清成 null，使用者得重設一次。
+    statsStartDate: cloud.statsStartDate ?? local.statsStartDate ?? null,
   };
 }
 

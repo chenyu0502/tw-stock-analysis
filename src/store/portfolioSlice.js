@@ -45,11 +45,6 @@ const initialState = {
    * 留空則沿用各持股自己的建倉日。
    */
   statsStartDate: null,
-  /**
-   * 由外部試算表匯入的週記帳：{ date, cost, inventory, pnl, weekPnl }。
-   * 用於補上系統開始記錄之前的月走勢與歷年績效。
-   */
-  weeklySnapshots: [],
 };
 
 const portfolioSlice = createSlice({
@@ -65,20 +60,12 @@ const portfolioSlice = createSlice({
       state.cashFlows = Array.isArray(data.cashFlows) ? data.cashFlows : [];
       state.cash = Number.isFinite(data.cash) ? data.cash : 0;
       state.statsStartDate = data.statsStartDate ?? null;
-      state.weeklySnapshots = Array.isArray(data.weeklySnapshots) ? data.weeklySnapshots : [];
     },
 
     /** 設定統計起算日，傳入空值即清除。 */
     setStatsStartDate(state, action) {
       const value = action.payload;
       state.statsStartDate = /^\d{4}-\d{2}-\d{2}$/.test(value ?? '') ? value : null;
-    },
-
-    /** 以匯入的週記帳覆寫既有資料。重複匯入同一份檔案不會累積。 */
-    setWeeklySnapshots(state, action) {
-      state.weeklySnapshots = Array.isArray(action.payload)
-        ? [...action.payload].sort((a, b) => a.date.localeCompare(b.date))
-        : [];
     },
 
     addWatch(state, action) {
@@ -224,7 +211,6 @@ export const {
   removeCashFlow,
   setCash,
   setStatsStartDate,
-  setWeeklySnapshots,
 } = portfolioSlice.actions;
 
 export default portfolioSlice.reducer;
