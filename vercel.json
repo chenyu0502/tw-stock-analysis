@@ -7,7 +7,6 @@
   },
   "rewrites": [
     {
-      "_comment": "SPA 轉址。version.json 明確排除：平台雖然會先比對檔案系統，但若哪天順序改變，版本檢查會拿到 index.html 而解析失敗，且是靜默失敗、不會有人發現。",
       "source": "/((?!api/|version.json).*)",
       "destination": "/index.html"
     }

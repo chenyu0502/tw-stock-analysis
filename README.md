@@ -343,6 +343,10 @@ ATR 與期間高低點也是合法引用來源，只比對價位清單會把合�
 `vercel.json` 的 SPA 轉址規則明確排除 `version.json`。平台雖然會先比對檔案系統，
 但若順序改變，版本檢查會拿到 `index.html` 而解析失敗，且是靜默失敗、不會有人發現。
 
+注意 `vercel.json` 採嚴格結構驗證，**不可加入 schema 未定義的欄位**（例如自製的 `_comment`），
+否則整個部署會失敗，而 GitHub 上只會顯示「Deployment failed」，不會指出是哪一行。
+JSON 本身也不支援註解，說明一律寫在這份文件裡。
+
 ## 部署
 
 推送到 GitHub 後於 Vercel 匯入專案，框架選 Vite，並在專案設定中加入環境變數
