@@ -384,7 +384,14 @@ export default function PerformanceTab() {
                   labelStyle={{ color: '#94a3b8' }}
                   formatter={(value) => [money(value), '損益']}
                 />
-                <Bar dataKey="pnl" name="損益">
+                {/*
+                  關掉進場動畫。各檔歷史股價是逐一載入的，每載入一檔就會重算整條權益曲線，
+                  這張圖的資料因此在開頁後連續換新數十次。recharts 每次換資料都會重啟動畫，
+                  其 JavascriptAnimate 在 effect 內 setState，連續重啟會撞到 React 的
+                  更新深度上限（Maximum update depth exceeded）。
+                  這是一張靜態的月損益長條圖，動畫本來就沒有作用。
+                */}
+                <Bar dataKey="pnl" name="損益" isAnimationActive={false}>
                   {/* 台股慣例紅漲綠跌，正負月份分別上色。 */}
                   {monthly.map((m) => (
                     <Cell key={m.month} fill={m.pnl >= 0 ? '#f43f5e' : '#10b981'} />
