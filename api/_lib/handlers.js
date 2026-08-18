@@ -205,6 +205,201 @@ export async function quoteHandler(query) {
 }
 
 /* ------------------------------------------------------------------ */
+/* 除權息與官方收盤行情                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 民國日期轉西元 YYYY-MM-DD。
+ *
+ * 兩個上游的格式不同：證交所是「115年08月18日」，櫃買是「1150818」。
+ * @param {string} value
+ * @returns {string|null}
+ */
+function rocToIso(value) {
+  const digits = String(value ?? '').replace(/\D/g, '');
+  // 民國年可能是二位或三位數，從尾端切出月與日比較安全。
+  if (digits.length < 6) return null;
+  const day = digits.slice(-2);
+  const month = digits.slice(-4, -2);
+  const rocYear = Number(digits.slice(0, -4));
+  if (!rocYear) return null;
+  return `${rocYear + 1911}-${month}-${day}`;
+}
+
+/** YYYY-MM-DD → YYYYMMDD */
+function isoToCompact(iso) {
+  return iso.replace(/-/g, '');
+}
+
+/**
+ * 取得近期的除權息資料，來源為證交所與櫃買中心。
+ *
+ * 為什麼不沿用 Yahoo 帶回的除權息事件：Yahoo 的事件表落後於價格。
+ * 2026-08-18 有六檔 ETF 除息（00878、00891、00900、00944、00945B、00980A），
+ * Yahoo 的收盤價當天就已經扣掉配息，事件表卻還沒有那一筆，
+ * 結果是憑空多出一筆等於配息的虧損——以該日的部位計算是一萬六千餘元。
+ * 證交所在除息當天就會公布，是這件事唯一可靠的來源。
+ *
+ * 證交所提供「除權息前收盤價」與「除權息參考價」，兩者相減就是當天要補回的金額。
+ * 這個差額對現金股利等於每股配息，對股票股利則是參考價的調整幅度，
+ * 用它做淨值還原在兩種情況下都成立（股票股利另有股數變動，需自行補交易紀錄）。
+ *
+ * @returns {Promise<Record<string, Record<string, number>>>} 代號 → 日期 → 每股還原金額
+ */
+async function loadExRights() {
+  return withPartialCache('exrights', TTL.DAILY, async () => {
+    const map = {};
+    let twseOk = false;
+    let tpexOk = false;
+
+    /** 寫入時取較大值，避免同一天重複來源互相覆蓋成較小的金額。 */
+    const put = (code, date, amount) => {
+      if (!code || !date || !Number.isFinite(amount) || amount <= 0) return;
+      map[code] ??= {};
+      map[code][date] = Math.max(map[code][date] ?? 0, amount);
+    };
+
+    // 證交所：除權除息計算結果表。查詢區間往回一百二十天，足以涵蓋季配與月配。
+    try {
+      const end = new Date();
+      const start = new Date(Date.now() - 120 * 86400000);
+      const url =
+        `${TWSE_RWD}/exRight/TWT49U?startDate=${isoToCompact(start.toISOString().slice(0, 10))}` +
+        `&endDate=${isoToCompact(end.toISOString().slice(0, 10))}&response=json`;
+      const json = await fetchJson(url);
+      for (const row of json?.data ?? []) {
+        // 欄位順序：資料日期、股票代號、股票名稱、除權息前收盤價、除權息參考價、權值+息值
+        const before = toNumber(row[3]);
+        const reference = toNumber(row[4]);
+        const combined = toNumber(row[5]);
+        // 前收減參考價是實際的價格調整幅度；取不到時退而用申報的權值加息值。
+        const amount =
+          before !== null && reference !== null ? before - reference : combined;
+        put(String(row[1] ?? '').trim(), rocToIso(row[0]), amount);
+      }
+      twseOk = true;
+    } catch {
+      // 單一市場失敗不應讓另一個市場的資料一起消失。
+    }
+
+    // 櫃買中心：除權息預告與結果。此表沒有參考價，只能用申報的現金股利。
+    try {
+      const rows = await fetchJson(`${TPEX_OPENAPI}/tpex_exright_prepost`);
+      for (const row of rows ?? []) {
+        put(
+          String(row.SecuritiesCompanyCode ?? '').trim(),
+          rocToIso(row.ExRrightsExDividendDate),
+          toNumber(row.CashDividend)
+        );
+      }
+      tpexOk = true;
+    } catch {
+      // 同上。
+    }
+
+    return { value: map, complete: twseOk && tpexOk };
+  });
+}
+
+/**
+ * 從表格中依欄位名稱取出數值，找不到欄位回傳 null。
+ * @param {string[]} fields
+ * @param {string[]} row
+ * @param {string} name
+ * @returns {number|null}
+ */
+function cellByField(fields, row, name) {
+  const index = fields.indexOf(name);
+  return index === -1 ? null : toNumber(row[index]);
+}
+
+/**
+ * 取得某一交易日的全市場官方行情。
+ *
+ * 存在的理由是 Yahoo 對台股 ETF 的日線不可靠，而且有兩種不同的壞法：
+ *
+ * 1. **缺值**：近一兩天的 close 是 null。跳過那天會讓該日損益變成零，
+ *    隔天則同時承擔兩天的漲跌——總額沒錯，但逐日數字全部對不上。
+ * 2. **錯值**：2026-08-17 的 00940，Yahoo 給 12.54，證交所是 12.46。
+ *    這種錯誤不會自己浮現，只會讓當天與隔天的損益各錯一段。
+ *
+ * 因此近期的收盤價一律以證交所與櫃買的官方行情為準，不只是補缺值。
+ *
+ * @param {string} isoDate YYYY-MM-DD
+ * @returns {Promise<Record<string, {open:number|null, high:number|null, low:number|null, close:number}>>}
+ */
+async function loadDailyQuotes(isoDate) {
+  return withPartialCache(`dailyquotes:${isoDate}`, TTL.DAILY, async () => {
+    const map = {};
+    let twseOk = false;
+    let tpexOk = false;
+
+    // 證交所：每日收盤行情（全部）。回應分成多張表，取含「收盤價」欄位的那一張。
+    try {
+      const url = `${TWSE_RWD}/afterTrading/MI_INDEX?date=${isoToCompact(isoDate)}&type=ALL&response=json`;
+      const json = await fetchJson(url);
+      for (const table of json?.tables ?? []) {
+        const fields = (table.fields ?? []).map((f) => String(f).trim());
+        if (!fields.includes('收盤價')) continue;
+        for (const row of table.data ?? []) {
+          const code = String(row[0] ?? '').trim();
+          const close = cellByField(fields, row, '收盤價');
+          if (!code || close === null || close <= 0) continue;
+          map[code] = {
+            open: cellByField(fields, row, '開盤價'),
+            high: cellByField(fields, row, '最高價'),
+            low: cellByField(fields, row, '最低價'),
+            close,
+          };
+        }
+        break;
+      }
+      twseOk = true;
+    } catch {
+      // 同 loadExRights，允許只有單一市場。
+    }
+
+    // 櫃買中心：上櫃股票每日收盤行情。日期參數是西元的 YYYY/MM/DD，欄位名稱也不同。
+    try {
+      const url =
+        `https://www.tpex.org.tw/www/zh-tw/afterTrading/otc` +
+        `?date=${encodeURIComponent(isoDate.replace(/-/g, '/'))}&type=EW&id=&response=json`;
+      const json = await fetchJson(url);
+      for (const table of json?.tables ?? []) {
+        const fields = (table.fields ?? []).map((f) => String(f).trim());
+        if (!fields.includes('收盤')) continue;
+        for (const row of table.data ?? []) {
+          const code = String(row[0] ?? '').trim();
+          const close = cellByField(fields, row, '收盤');
+          if (!code || close === null || close <= 0 || map[code]) continue;
+          map[code] = {
+            open: cellByField(fields, row, '開盤'),
+            high: cellByField(fields, row, '最高'),
+            low: cellByField(fields, row, '最低'),
+            close,
+          };
+        }
+        break;
+      }
+      tpexOk = true;
+    } catch {
+      // 同上。
+    }
+
+    // 空結果不視為完整，讓盤中查詢當日資料的情形能在收盤後很快重試。
+    return { value: map, complete: twseOk && tpexOk && Object.keys(map).length > 0 };
+  });
+}
+
+/**
+ * 以官方行情校正的交易日數。
+ *
+ * 只涵蓋最近幾天：對帳看的就是這幾天，而每多一天就要多打兩次上游，
+ * 且每次回應都是全市場上千列。更早的資料 Yahoo 通常已經補正確。
+ */
+const OFFICIAL_CLOSE_DAYS = 6;
+
+/* ------------------------------------------------------------------ */
 /* 端點：歷史 K 線                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -214,9 +409,12 @@ export async function quoteHandler(query) {
  * 資料來源 Yahoo Finance。台股代號需加市場後綴：上市 .TW、上櫃 .TWO。
  * 對照表查不到時，兩種後綴依序嘗試。
  *
- * 一併帶回除權息事件（events=div）。收盤價是未還原的原始價格，除息當天會直接
- * 跌掉配息金額；績效計算若只看價差，那一天會憑空多出一筆等於配息的虧損。
+ * 一併帶回除權息資料。收盤價是未還原的原始價格，除息當天會直接跌掉配息金額；
+ * 績效計算若只看價差，那一天會憑空多出一筆等於配息的虧損。
  * 把配息金額交給前端，權益曲線才能在除息日補回這筆現金。
+ *
+ * 除權息以證交所與櫃買的官方資料為準——Yahoo 的事件表會落後於它自己的價格。
+ * Yahoo 近期缺漏的收盤價也會用證交所的每日收盤行情補上。
  */
 export async function historyHandler(query) {
   const code = String(query.code ?? '').trim();
@@ -251,26 +449,55 @@ export async function historyHandler(query) {
         }
 
         const q = result.indicators.quote[0];
-        const candles = result.timestamp
-          .map((ts, i) => ({
-            date: new Date(ts * 1000).toISOString().slice(0, 10),
-            open: q.open?.[i] ?? null,
-            high: q.high?.[i] ?? null,
-            low: q.low?.[i] ?? null,
-            close: q.close?.[i] ?? null,
-            // Yahoo 的成交量單位是股，換算為張與報價端點一致。
-            volume: q.volume?.[i] == null ? null : q.volume[i] / SHARES_PER_LOT,
-          }))
-          // Yahoo 會夾帶收盤價為 null 的空列（停牌或資料缺漏），保留會讓指標計算出錯。
-          .filter((c) => c.close !== null);
+        const raw = result.timestamp.map((ts, i) => ({
+          date: new Date(ts * 1000).toISOString().slice(0, 10),
+          open: q.open?.[i] ?? null,
+          high: q.high?.[i] ?? null,
+          low: q.low?.[i] ?? null,
+          close: q.close?.[i] ?? null,
+          // Yahoo 的成交量單位是股，換算為張與報價端點一致。
+          volume: q.volume?.[i] == null ? null : q.volume[i] / SHARES_PER_LOT,
+        }));
 
-        // Yahoo 以除息日的時間戳為鍵，值為每股配息金額（現金股利）。
-        const dividends = Object.values(result.events?.dividends ?? {})
-          .map((ev) => ({
-            date: new Date(ev.date * 1000).toISOString().slice(0, 10),
-            amount: ev.amount,
-          }))
-          .filter((d) => Number.isFinite(d.amount) && d.amount > 0)
+        // 近幾個交易日改以證交所與櫃買的官方行情為準，Yahoo 只作為更早期資料的來源。
+        // 這一步同時處理 Yahoo 的缺值與錯值，兩種情況都出現過。
+        const recent = raw.slice(-OFFICIAL_CLOSE_DAYS);
+        const officialQuotes = await Promise.all(recent.map((c) => loadDailyQuotes(c.date)));
+        let corrected = 0;
+        recent.forEach((candle, i) => {
+          const row = officialQuotes[i][code];
+          if (!row) return;
+          // Yahoo 的價格是浮點數，直接比對會把 12.489999771 與 12.49 當成不同，
+          // 這個計數只是給人看的，用半個最小跳動單位當容差。
+          if (candle.close === null || Math.abs(candle.close - row.close) > 0.005) corrected += 1;
+          candle.open = row.open ?? candle.open;
+          candle.high = row.high ?? candle.high;
+          candle.low = row.low ?? candle.low;
+          candle.close = row.close;
+        });
+
+        // 仍為 null 的空列必須濾掉，保留會讓指標計算出錯。
+        const candles = raw.filter((c) => c.close !== null);
+
+        // 除權息以證交所與櫃買的官方資料為準，Yahoo 的事件表僅作為補充。
+        //
+        // Yahoo 的事件表落後於它自己的價格：除息當天收盤價已經扣掉配息，
+        // 事件表卻還沒有那一筆，權益曲線會因此多出一筆等於配息的虧損。
+        const officialDividends = (await loadExRights())[code] ?? {};
+        const byDate = new Map();
+        for (const ev of Object.values(result.events?.dividends ?? {})) {
+          const date = new Date(ev.date * 1000).toISOString().slice(0, 10);
+          if (Number.isFinite(ev.amount) && ev.amount > 0) byDate.set(date, ev.amount);
+        }
+        // 官方資料後寫入，同一天以官方為準。
+        for (const [date, amount] of Object.entries(officialDividends)) byDate.set(date, amount);
+
+        const first = candles[0]?.date;
+        const last = candles[candles.length - 1]?.date;
+        const dividends = [...byDate.entries()]
+          .map(([date, amount]) => ({ date, amount }))
+          // 落在本次 K 線區間之外的配息與這段曲線無關，帶出去只會讓使用端誤用。
+          .filter((d) => (!first || d.date >= first) && (!last || d.date <= last))
           .sort((a, b) => a.date.localeCompare(b.date));
 
         return {
@@ -280,6 +507,8 @@ export async function historyHandler(query) {
           currency: result.meta?.currency ?? 'TWD',
           candles,
           dividends,
+          // 近幾日有幾根 K 棒的收盤價與 Yahoo 不同，已改用官方數字。供除錯對帳用。
+          correctedCloses: corrected,
           fetchedAt: new Date().toISOString(),
         };
       } catch (err) {

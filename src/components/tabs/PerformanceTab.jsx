@@ -83,8 +83,11 @@ export default function PerformanceTab() {
         currentCash: cash,
         historyByCode: history,
         startDate: statsStartDate,
+        // 帶入即時報價，月曆今天那格才會與上方的「今日損益」同一個口徑。
+        quotes,
+        todayDate: todayDate(),
       }),
-    [allTransactions, cashFlows, cash, history, statsStartDate]
+    [allTransactions, cashFlows, cash, history, statsStartDate, quotes]
   );
 
   const curveMonthly = useMemo(() => aggregateByMonth(curve), [curve]);

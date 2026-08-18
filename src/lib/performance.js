@@ -88,6 +88,8 @@ export function normalizeTransactions(holdings, transactions, statsStartDate = n
  * @param {Record<string, {candles: object[], dividends?: {date:string, amount:number}[]}>} params.historyByCode
  *        各檔歷史 K 線與除權息事件
  * @param {string|null} [params.startDate] 統計起算日，早於此日的交易併入期初部位
+ * @param {Record<string, object>} [params.quotes] 即時報價，用於把曲線最後一天改以現價評價
+ * @param {string|null} [params.todayDate] 今日日期，僅在曲線最後一天等於今日時才套用現價
  * @returns {{date:string, cash:number, positionValue:number, netWorth:number, netFlow:number, pnl:number, cumulativePnl:number, cumulativeDividend:number}[]}
  */
 export function buildEquityCurve({
@@ -96,6 +98,8 @@ export function buildEquityCurve({
   currentCash = 0,
   historyByCode,
   startDate = null,
+  quotes = {},
+  todayDate = null,
 }) {
   const codes = [...new Set(transactions.map((t) => t.code))];
   if (codes.length === 0) return [];
@@ -200,6 +204,16 @@ export function buildEquityCurve({
     openingPositionValue += shares * close;
   }
 
+  // 曲線最後一天若就是今天，改以即時報價評價。
+  //
+  // 歷史 K 線在前端整場快取，盤中不會重抓，今日那根 K 棒因此停在開頁當下的價格；
+  // 而「今日損益」用的是每次重新整理都會更新的即時報價。兩者同源不同時點，
+  // 盤中一定會愈差愈遠——使用者看到的就是月曆今天那格與今日損益對不起來。
+  // 改以現價評價後，兩個數字在盤中也是同一個口徑。
+  //
+  // 除息日仍然一致：即時報價的昨收是除息參考價，而曲線是「原始昨收 − 配息」，兩者相等。
+  const liveDate = todayDate && dates[dates.length - 1] === todayDate ? todayDate : null;
+
   // 先正推持股與現金變動量，再由目前現金往回推算每日現金。
   const held = { ...openingShares };
   const rows = [];
@@ -227,20 +241,20 @@ export function buildEquityCurve({
     const netFlow = flowByDate.get(date) ?? 0;
     cumulativeCashDelta += netFlow;
 
-    let positionValue = 0;
-    for (const code of codes) {
-      const shares = held[code] ?? 0;
-      if (shares === 0) continue;
+    /** 當日評價用的價格：今日優先採即時報價，其次收盤價，再其次沿用前一日。 */
+    const priceOf = (code) => {
+      const live = date === liveDate ? quotes[code]?.price : null;
       const close = closeByCode[code].get(date);
       // 個股當日無報價（停牌或該檔資料起點較晚）時沿用前一日市值，避免淨值出現假跳空。
-      const price = close ?? rows[rows.length - 1]?.priceByCode?.[code] ?? 0;
-      positionValue += shares * price;
-    }
+      return live ?? close ?? rows[rows.length - 1]?.priceByCode?.[code] ?? 0;
+    };
 
+    let positionValue = 0;
     const priceByCode = {};
     for (const code of codes) {
-      const close = closeByCode[code].get(date);
-      priceByCode[code] = close ?? rows[rows.length - 1]?.priceByCode?.[code] ?? 0;
+      const price = priceOf(code);
+      priceByCode[code] = price;
+      positionValue += (held[code] ?? 0) * price;
     }
 
     rows.push({ date, positionValue, netFlow, cumulativeCashDelta, cumulativeDividend, priceByCode });

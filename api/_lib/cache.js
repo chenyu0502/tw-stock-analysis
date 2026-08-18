@@ -8,6 +8,15 @@
 const store = new Map();
 
 /**
+ * 進行中的 producer，用於合併同一把鑰匙的併發請求。
+ *
+ * 績效頁一次會查數十檔個股的歷史股價，每一檔都會用到同一份除權息表與同一天的
+ * 全市場收盤行情。若只看快取有無命中，這數十個請求會在快取寫入前全部撲空，
+ * 對上游打出數十次一模一樣的查詢。
+ */
+const inflight = new Map();
+
+/**
  * 取出未過期的快取值，過期或不存在則回傳 undefined。
  * @param {string} key
  * @returns {*}
@@ -42,9 +51,23 @@ export function cacheSet(key, value, ttlMs) {
 export async function withCache(key, ttlMs, producer) {
   const hit = cacheGet(key);
   if (hit !== undefined) return hit;
-  const value = await producer();
-  cacheSet(key, value, ttlMs);
-  return value;
+
+  // 已有同一把鑰匙在執行就共用那個 promise，不重複打上游。
+  const pending = inflight.get(key);
+  if (pending) return pending;
+
+  const promise = (async () => {
+    const value = await producer();
+    cacheSet(key, value, ttlMs);
+    return value;
+  })();
+  inflight.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    // 失敗時一併清掉，否則後續請求會一直拿到同一個被拒絕的 promise。
+    inflight.delete(key);
+  }
 }
 
 /**
