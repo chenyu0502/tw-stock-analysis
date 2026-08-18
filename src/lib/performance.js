@@ -21,6 +21,9 @@
  */
 function toDateString(ts) {
   const d = new Date(ts);
+  // 時間戳缺漏或格式異常時 Date 會是 Invalid Date，直接格式化會產出 "NaN-NaN-NaN"。
+  // 那個字串在後續的日期比大小中永遠排在數字之前，會讓統計區間退回到資料最早的一天。
+  if (Number.isNaN(d.getTime())) return toDateString(Date.now());
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
@@ -79,9 +82,16 @@ export function normalizeTransactions(holdings, transactions, statsStartDate = n
  * @param {object[]} params.cashFlows 資金流水
  * @param {number} params.currentCash 目前帳上現金
  * @param {Record<string, {candles: object[]}>} params.historyByCode 各檔歷史 K 線
+ * @param {string|null} [params.startDate] 統計起算日，早於此日的交易併入期初部位
  * @returns {{date:string, cash:number, positionValue:number, netWorth:number, netFlow:number, pnl:number, cumulativePnl:number}[]}
  */
-export function buildEquityCurve({ transactions, cashFlows = [], currentCash = 0, historyByCode }) {
+export function buildEquityCurve({
+  transactions,
+  cashFlows = [],
+  currentCash = 0,
+  historyByCode,
+  startDate = null,
+}) {
   const codes = [...new Set(transactions.map((t) => t.code))];
   if (codes.length === 0) return [];
 
@@ -103,12 +113,22 @@ export function buildEquityCurve({ transactions, cashFlows = [], currentCash = 0
   //
   // 歷史股價的區間通常比帳戶存在的時間長（預設抓兩年），若從股價區間起點開始算，
   // 那段期間會因為現金是由目前餘額往回推而出現負值，導致淨值與年度報酬完全失真。
-  const inception = [
-    ...transactions.map((t) => t.date),
-    ...cashFlows.map((c) => c.date),
-  ].sort()[0];
-  const startIndex = inception ? Math.max(0, allDates.findIndex((d) => d >= inception)) : 0;
-  const dates = allDates.slice(startIndex === -1 ? 0 : startIndex);
+  const earliest = [...transactions.map((t) => t.date), ...cashFlows.map((c) => c.date)]
+    .filter(Boolean)
+    .sort()[0];
+
+  // startDate 是硬性下界，優先於交易紀錄推得的日期。
+  //
+  // 先前只把它用在「補建倉」的持股上，只要有任何一筆較早的真實交易紀錄，
+  // 起算日就完全失效，統計區間會被拉回到那筆交易，甚至退到歷史股價的起點。
+  // 使用者設定起算日的意思是「統計從這天開始」，不是「建議值」。
+  // 早於這一天的交易由下方的期初部位邏輯併入，不會遺失持股數。
+  const inception = startDate && (!earliest || startDate > earliest) ? startDate : earliest;
+
+  const foundIndex = inception ? allDates.findIndex((d) => d >= inception) : 0;
+  // 找不到代表起算日晚於所有交易日，此時沒有可統計的區間。
+  if (foundIndex === -1) return [];
+  const dates = allDates.slice(Math.max(0, foundIndex));
   if (dates.length === 0) return [];
 
   // 交易日期未必落在交易日上（使用者可能填到假日），逐筆對齊到當日或之後的第一個交易日。

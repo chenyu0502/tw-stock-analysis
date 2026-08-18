@@ -82,8 +82,9 @@ export default function PerformanceTab() {
         cashFlows,
         currentCash: cash,
         historyByCode: history,
+        startDate: statsStartDate,
       }),
-    [allTransactions, cashFlows, cash, history]
+    [allTransactions, cashFlows, cash, history, statsStartDate]
   );
 
   const curveMonthly = useMemo(() => aggregateByMonth(curve), [curve]);
