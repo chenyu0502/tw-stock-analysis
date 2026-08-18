@@ -69,6 +69,37 @@ export function normalizeTransactions(holdings, transactions, statsStartDate = n
   return [...transactions, ...synthetic].sort((a, b) => a.date.localeCompare(b.date));
 }
 
+/**
+ * 比對交易紀錄累加出來的股數與持股清單，回傳每檔的差額。
+ *
+ * 權益曲線的股數是由交易紀錄逐筆累加，持股頁則直接採用持股清單。
+ * 兩者只要不一致，兩頁就會各說各話，而且完全沒有跡象——
+ * 持股頁的市值正確，績效頁的每日損益卻整段等比例放大或縮小。
+ * 實際遇到的情形是交易紀錄被重複匯入，每日損益因此變成大約兩倍。
+ *
+ * 持股清單是使用者直接維護、也是持股頁採用的來源，可信度較高，
+ * 因此以它為準：差額補進期初部位，讓曲線的終點股數必然等於持股清單。
+ *
+ * @param {object[]} transactions 已正規化的交易紀錄
+ * @param {object[]} holdings
+ * @returns {Record<string, number>} 代號 → 應補進期初部位的股數（僅列出不為零者）
+ */
+export function reconcileShares(transactions, holdings) {
+  const net = {};
+  for (const t of transactions) net[t.code] = (net[t.code] ?? 0) + t.shares;
+
+  const target = {};
+  for (const h of holdings) target[h.code] = (target[h.code] ?? 0) + h.shares;
+
+  const adjustments = {};
+  // 交易紀錄裡出現過的代號都要檢查。已出清的標的不在持股清單中，目標股數為零。
+  for (const code of new Set([...Object.keys(net), ...Object.keys(target)])) {
+    const diff = (target[code] ?? 0) - (net[code] ?? 0);
+    if (diff !== 0) adjustments[code] = diff;
+  }
+  return adjustments;
+}
+
 /* ------------------------------------------------------------------ */
 /* 權益曲線                                                            */
 /* ------------------------------------------------------------------ */
@@ -90,6 +121,7 @@ export function normalizeTransactions(holdings, transactions, statsStartDate = n
  * @param {string|null} [params.startDate] 統計起算日，早於此日的交易併入期初部位
  * @param {Record<string, object>} [params.quotes] 即時報價，用於把曲線最後一天改以現價評價
  * @param {string|null} [params.todayDate] 今日日期，僅在曲線最後一天等於今日時才套用現價
+ * @param {object[]|null} [params.holdings] 目前持股。帶入後曲線的終點股數會校正為與持股清單一致
  * @returns {{date:string, cash:number, positionValue:number, netWorth:number, netFlow:number, pnl:number, cumulativePnl:number, cumulativeDividend:number}[]}
  */
 export function buildEquityCurve({
@@ -100,6 +132,7 @@ export function buildEquityCurve({
   startDate = null,
   quotes = {},
   todayDate = null,
+  holdings = null,
 }) {
   const codes = [...new Set(transactions.map((t) => t.code))];
   if (codes.length === 0) return [];
@@ -164,6 +197,16 @@ export function buildEquityCurve({
     const list = txByDate.get(alignedDate) ?? [];
     list.push(tx);
     txByDate.set(alignedDate, list);
+  }
+
+  // 交易紀錄與持股清單對不起來時，以持股清單為準，差額補進期初部位。
+  //
+  // 若不校正，曲線的股數會整段偏離：交易紀錄重複匯入會讓每日損益變成大約兩倍，
+  // 而持股頁因為直接讀持股清單仍然正確，使用者只會看到兩頁互相矛盾卻找不到原因。
+  if (holdings) {
+    for (const [code, diff] of Object.entries(reconcileShares(transactions, holdings))) {
+      openingShares[code] = (openingShares[code] ?? 0) + diff;
+    }
   }
 
   const flowByDate = new Map();

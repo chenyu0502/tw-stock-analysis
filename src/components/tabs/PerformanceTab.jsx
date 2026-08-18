@@ -21,6 +21,7 @@ import {
   realizedSummary,
   positionSummary,
   todayPnl,
+  reconcileShares,
 } from '../../lib/performance.js';
 import { money, pct, num, int, changeColor } from '../../lib/format.js';
 import PnlCalendar from '../PnlCalendar.jsx';
@@ -86,9 +87,19 @@ export default function PerformanceTab() {
         // 帶入即時報價，月曆今天那格才會與上方的「今日損益」同一個口徑。
         quotes,
         todayDate: todayDate(),
+        // 帶入持股清單，曲線的股數才會校正為與持股頁一致。
+        holdings,
       }),
-    [allTransactions, cashFlows, cash, history, statsStartDate, quotes]
+    [allTransactions, cashFlows, cash, history, statsStartDate, quotes, holdings]
   );
+
+  // 交易紀錄累加出來的股數與持股清單不一致的標的。
+  // 最常見的成因是交易紀錄重複匯入，會讓每日損益整段等比例放大。
+  const shareMismatch = useMemo(
+    () => reconcileShares(allTransactions, holdings),
+    [allTransactions, holdings]
+  );
+  const mismatchCodes = Object.keys(shareMismatch);
 
   const curveMonthly = useMemo(() => aggregateByMonth(curve), [curve]);
   const yearly = useMemo(() => aggregateByYear(curve), [curve]);
@@ -148,6 +159,27 @@ export default function PerformanceTab() {
         <div className="rounded-lg border border-amber-800/60 bg-amber-950/30 p-3 text-xs text-amber-300">
           推算出的歷史現金曾為負值，代表「帳上現金」與交易紀錄不一致，通常是漏記了入金。
           請到持股頁補記資金進出，否則淨值與年度報酬率會失真。
+        </div>
+      )}
+
+      {mismatchCodes.length > 0 && (
+        <div className="rounded-lg border border-amber-800/60 bg-amber-950/30 p-3 text-xs text-amber-300">
+          <div>
+            以下 {mismatchCodes.length} 檔的交易紀錄累加股數與持股清單不符。
+            下方數字已改以持股清單為準，但交易紀錄本身仍需修正，否則已實現損益會失真。
+            最常見的成因是同一批交易被匯入兩次。
+          </div>
+          <ul className="tabular mt-1.5 space-y-0.5">
+            {mismatchCodes.slice(0, 10).map((code) => {
+              const target = holdings.find((h) => h.code === code)?.shares ?? 0;
+              return (
+                <li key={code}>
+                  {code}　持股清單 {int(target)} 股　交易紀錄累加 {int(target - shareMismatch[code])} 股
+                </li>
+              );
+            })}
+            {mismatchCodes.length > 10 && <li>…另有 {mismatchCodes.length - 10} 檔</li>}
+          </ul>
         </div>
       )}
 
