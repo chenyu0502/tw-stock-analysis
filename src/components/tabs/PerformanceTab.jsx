@@ -12,7 +12,11 @@ import {
 } from 'recharts';
 import { CalendarClock } from 'lucide-react';
 import { loadHistory, loadQuotes } from '../../store/marketSlice.js';
-import { today as todayDate, setStatsStartDate } from '../../store/portfolioSlice.js';
+import {
+  today as todayDate,
+  setStatsStartDate,
+  dropTransactionsForCodes,
+} from '../../store/portfolioSlice.js';
 import {
   normalizeTransactions,
   buildEquityCurve,
@@ -164,22 +168,44 @@ export default function PerformanceTab() {
 
       {mismatchCodes.length > 0 && (
         <div className="rounded-lg border border-amber-800/60 bg-amber-950/30 p-3 text-xs text-amber-300">
-          <div>
-            以下 {mismatchCodes.length} 檔的交易紀錄累加股數與持股清單不符。
-            下方數字已改以持股清單為準，但交易紀錄本身仍需修正，否則已實現損益會失真。
-            最常見的成因是同一批交易被匯入兩次。
+          <div className="leading-relaxed">
+            以下 {mismatchCodes.length} 檔的「進出紀錄」與持股清單對不起來。
+            <span className="text-amber-200">下方所有數字已改以持股清單為準，是正確的。</span>
           </div>
-          <ul className="tabular mt-1.5 space-y-0.5">
-            {mismatchCodes.slice(0, 10).map((code) => {
+          <ul className="tabular mt-2 space-y-0.5">
+            {mismatchCodes.slice(0, 12).map((code) => {
               const target = holdings.find((h) => h.code === code)?.shares ?? 0;
               return (
                 <li key={code}>
-                  {code}　持股清單 {int(target)} 股　交易紀錄累加 {int(target - shareMismatch[code])} 股
+                  {code}　持股清單 {int(target)} 股　進出紀錄累計 {int(target - shareMismatch[code])} 股
                 </li>
               );
             })}
-            {mismatchCodes.length > 10 && <li>…另有 {mismatchCodes.length - 10} 檔</li>}
+            {mismatchCodes.length > 12 && <li>…另有 {mismatchCodes.length - 12} 檔</li>}
           </ul>
+          <p className="mt-2 leading-relaxed text-amber-400/90">
+            「進出紀錄」是每次在持股頁新增持股時自動留下的，介面上沒有列出的地方。
+            之後直接修改股數並不會更新它，重複輸入過同一檔也會多留一筆，兩邊就此分家。
+          </p>
+          {/* 沒有實際買賣時，清掉這些紀錄是最乾淨的收尾：
+              該檔會改用「以統計起算日建倉」的補記方式，股數與成本直接取自持股清單。 */}
+          <button
+            type="button"
+            onClick={() => {
+              if (
+                window.confirm(
+                  `將清除這 ${mismatchCodes.length} 檔的進出紀錄，持股本身不受影響。\n` +
+                    '這些標的的歷史買賣明細會消失，已實現損益也會一併移除。\n' +
+                    '若這幾檔確實有過買賣，請先用上方的「匯出 JSON」備份。\n\n確定要清除嗎？'
+                )
+              ) {
+                dispatch(dropTransactionsForCodes(mismatchCodes));
+              }
+            }}
+            className="mt-2 rounded border border-amber-700 px-2 py-1 text-amber-200 transition hover:bg-amber-900/40"
+          >
+            清除這 {mismatchCodes.length} 檔的進出紀錄
+          </button>
         </div>
       )}
 

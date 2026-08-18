@@ -162,6 +162,25 @@ const portfolioSlice = createSlice({
       state.transactions = state.transactions.filter((t) => t.id !== action.payload);
     },
 
+    /**
+     * 清除指定標的的全部進出紀錄，持股本身保留。
+     *
+     * 給「進出紀錄與持股清單對不起來」的情況收尾用。
+     * 新增持股時系統會留下一筆買進紀錄，但之後直接修改股數並不會更新它，
+     * 兩邊從此分家。介面上又沒有列出這些紀錄的地方，使用者無從自行修正。
+     *
+     * 清掉之後，該檔在權益曲線中會改用「以統計起算日建倉」的補記方式，
+     * 股數與成本直接取自持股清單，兩邊必然一致。
+     * 代價是該檔的歷史買賣明細不再保留，因此僅適用於沒有實際交易的標的。
+     *
+     * payload: string[] 代號清單
+     */
+    dropTransactionsForCodes(state, action) {
+      const codes = new Set(action.payload ?? []);
+      if (codes.size === 0) return;
+      state.transactions = state.transactions.filter((t) => !codes.has(t.code));
+    },
+
     removeHolding(state, action) {
       state.holdings = state.holdings.filter((h) => h.code !== action.payload);
     },
@@ -205,6 +224,7 @@ export const {
   updateWatch,
   recordTrade,
   removeTransaction,
+  dropTransactionsForCodes,
   removeHolding,
   updateHolding,
   recordCashFlow,
