@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { AlertTriangle, RefreshCw, ScanLine, Layers, Activity } from 'lucide-react';
+import { AlertTriangle, RefreshCw, ScanLine, Layers, Activity, Scale } from 'lucide-react';
 import { loadFundamentals } from '../store/marketSlice.js';
 import { detectRisks, SEVERITY } from '../lib/risks.js';
 import { buildAnalysisInput } from '../lib/analysisInput.js';
@@ -8,6 +8,7 @@ import { today as todayDate, DEFAULT_MA } from '../store/portfolioSlice.js';
 import ScanPanel from './ScanPanel.jsx';
 import MarginQuadrant from './MarginQuadrant.jsx';
 import StanceOverview from './StanceOverview.jsx';
+import ValuationOverview from './ValuationOverview.jsx';
 
 /** 嚴重度的顏色，與 AI 頁的風險清單一致。 */
 const SEVERITY_COLOR = { high: 'text-rose-500', medium: 'text-amber-500', low: 'text-slate-500' };
@@ -26,6 +27,9 @@ const MARGIN_RULE_IDS = new Set([
   'short-cover',
   'short-margin',
 ]);
+
+/** 估值分位相關的規則，改由估值檢視面板呈現，不再混進其餘規則。 */
+const VALUATION_RULE_IDS = new Set(['pe-high', 'pb-high']);
 
 /**
  * 持股頁的批次掃描區。
@@ -112,7 +116,8 @@ export default function RiskScan({ holdings }) {
         );
     return {
       margin: pick((x) => MARGIN_RULE_IDS.has(x.id)),
-      others: pick((x) => !MARGIN_RULE_IDS.has(x.id)),
+      valuation: pick((x) => VALUATION_RULE_IDS.has(x.id)),
+      others: pick((x) => !MARGIN_RULE_IDS.has(x.id) && !VALUATION_RULE_IDS.has(x.id)),
     };
   }, [rows]);
 
@@ -123,6 +128,7 @@ export default function RiskScan({ holdings }) {
   const withMargin = holdings.filter((h) =>
     Number.isFinite(marginMap[h.code]?.marginChangePercent)
   ).length;
+  const withValuation = holdings.filter((h) => fundamentalsMap[h.code]?.bands?.pe).length;
   const count = (list) => list.reduce((acc, r) => acc + r.risks.length, 0);
 
   return (
@@ -163,6 +169,29 @@ export default function RiskScan({ holdings }) {
       </ScanPanel>
 
       <ScanPanel
+        icon={<Scale size={14} className="shrink-0 text-slate-400" />}
+        title="估值檢視"
+        summary={
+          withValuation === 0
+            ? '持股皆無估值資料'
+            : split.valuation.length === 0
+              ? `${withValuation} 檔有資料，皆未達高分位`
+              : `${split.valuation.length} 檔位於高分位`
+        }
+        defaultOpen={split.valuation.length > 0}
+      >
+        <ValuationOverview holdings={holdings} />
+        {/* 與融資融券面板一致：圖上看得到位置，觸發的項目仍要有文字說明。 */}
+        {split.valuation.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {split.valuation.map((row) => (
+              <RiskRow key={row.code} row={row} />
+            ))}
+          </div>
+        )}
+      </ScanPanel>
+
+      <ScanPanel
         icon={<ScanLine size={14} className="shrink-0 text-slate-400" />}
         title="其餘規則掃描"
         summary={
@@ -174,8 +203,8 @@ export default function RiskScan({ holdings }) {
       >
         {split.others.length === 0 ? (
           <p className="py-4 text-center text-sm text-slate-500">
-            目前沒有標的觸發估值、基本面、技術面或事件類的規則。這不代表沒有風險，
-            只代表這份清單涵蓋的項目都未達門檻。
+            目前沒有標的觸發基本面、技術面或事件類的規則。這不代表沒有風險，
+            只代表這份清單涵蓋的項目都未達門檻。估值分位另見上方的估值檢視。
           </p>
         ) : (
           <div className="space-y-2">
@@ -204,7 +233,7 @@ export default function RiskScan({ holdings }) {
         <p className="mt-1.5 text-[10px] leading-relaxed text-slate-600">
           依固定門檻逐條檢查，不經過 AI，同樣的資料一定得到同樣的結果。每項都附觸發它的實際數值。
           {pending > 0 &&
-            `估值分位與財報那幾條規則需要另外查基本面（一檔五個資料集），尚有 ${pending} 檔未載入。`}
+            `財報那幾條規則需要另外查基本面（一檔五個資料集），尚有 ${pending} 檔未載入。`}
           {notReady > 0 &&
             `有 ${notReady} 檔的歷史股價尚未載入或不足 60 個交易日，技術面規則暫時跳過。`}
         </p>
