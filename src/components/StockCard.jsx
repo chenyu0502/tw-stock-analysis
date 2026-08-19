@@ -34,13 +34,22 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
   const institutional = useSelector((s) => s.market.institutional[item.code]);
   const chipHistory = useSelector((s) => s.market.institutionalHistory[item.code]);
 
-  // 展開時才抓歷史資料，避免清單一次載入數十檔造成不必要的流量。
-  // 法人歷史走 FinMind，免費方案每小時 600 次，逐檔延後載入才不會浪費額度。
+  // 歷史 K 線一律載入，因為收合狀態的標題列也要顯示均線攻守狀態。
+  //
+  // 原本只在展開時才抓，但那讓狀態必須逐張點開才看得到——
+  // 持有二十幾檔時等於看不到。整批載入的成本可以接受：
+  // 上游是 Yahoo 與證交所，沒有額度限制，伺服器端也有快取。
+  //
+  // 法人歷史則維持延後載入：那個走 FinMind，免費方案每小時 600 次，
+  // 一次替所有卡片抓會很快把額度用掉，而它只有展開時才顯示。
+  useEffect(() => {
+    if (!history) dispatch(loadHistory({ code: item.code, range: '1y' }));
+  }, [history, item.code, dispatch]);
+
   useEffect(() => {
     if (!expanded) return;
-    if (!history) dispatch(loadHistory({ code: item.code, range: '1y' }));
     if (!chipHistory) dispatch(loadInstitutionalHistory({ code: item.code, days: CHIP_DAYS }));
-  }, [expanded, history, chipHistory, item.code, dispatch]);
+  }, [expanded, chipHistory, item.code, dispatch]);
 
   const candles = history?.candles ?? [];
 
@@ -105,13 +114,17 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
               <span className="truncate text-sm text-slate-400">{name}</span>
             </div>
             {analysis && (
-              <span
-                className={`mt-1 inline-block rounded border px-1.5 py-0.5 text-[11px] ${stateColor(
-                  analysis.cross.state
-                )}`}
-              >
-                {analysis.cross.label} · {item.maShort}/{item.maLong}MA
-              </span>
+              <div className="mt-1 flex flex-wrap items-center gap-1">
+                <span
+                  className={`rounded border px-1.5 py-0.5 text-[11px] ${stateColor(
+                    analysis.cross.state
+                  )}`}
+                >
+                  {analysis.cross.label} · {item.maShort}/{item.maLong}MA
+                </span>
+                <StanceBadge tag="短" data={analysis.stances?.short} />
+                <StanceBadge tag="長" data={analysis.stances?.long} />
+              </div>
             )}
           </div>
 
@@ -301,6 +314,23 @@ const STANCE_STYLE = {
   down: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
   flat: 'border-slate-600/50 bg-slate-700/20 text-slate-400',
 };
+
+/**
+ * 收合狀態的簡短標籤，供整份清單掃視。
+ *
+ * 持續狀態（均線上／均線下）調暗，剛跌破或剛確認的才用顏色跳出來。
+ * 二十幾檔裡多數會停在持續狀態，全部上色等於沒有重點。
+ */
+function StanceBadge({ tag, data }) {
+  if (!data) return null;
+  const meta = STANCE_LABEL[data.state] ?? STANCE_LABEL.UNKNOWN;
+  const style = meta.steady ? 'border-slate-700/60 bg-slate-800/40 text-slate-500' : STANCE_STYLE[meta.side];
+  return (
+    <span className={`rounded border px-1.5 py-0.5 text-[11px] ${style}`} title={data.description}>
+      {tag}·{meta.short}
+    </span>
+  );
+}
 
 function StanceRow({ tag, data }) {
   if (!data) return null;

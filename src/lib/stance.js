@@ -19,17 +19,23 @@
 
 import { sma } from './indicators.js';
 
-/** 各狀態的顯示文字與方向。方向用於介面上色，與台股紅漲綠跌一致。 */
+/**
+ * 各狀態的顯示文字與方向。方向用於介面上色，與台股紅漲綠跌一致。
+ *
+ * short 是清單掃視用的簡稱，steady 表示「這是持續狀態，不是剛發生的事件」。
+ * 二十幾檔的清單裡，多數會停在均線上或均線下，那是常態不是訊息；
+ * 把常態調暗，剛跌破或剛確認的那幾檔才會跳出來。
+ */
 export const STANCE_LABEL = {
-  WATCH_BREAKDOWN: { label: '跌破觀察中', side: 'down' },
-  BEARISH_CONFIRMED: { label: '跌破確認', side: 'down' },
-  BREAKDOWN_FAILED: { label: '跌破未確認', side: 'up' },
-  BELOW: { label: '均線之下', side: 'down' },
-  WATCH_BREAKOUT: { label: '突破觀察中', side: 'up' },
-  BULLISH_CONFIRMED: { label: '突破確認', side: 'up' },
-  BREAKOUT_FAILED: { label: '突破未確認', side: 'down' },
-  ABOVE: { label: '均線之上', side: 'up' },
-  UNKNOWN: { label: '資料不足', side: 'flat' },
+  WATCH_BREAKDOWN: { label: '跌破觀察中', short: '跌破觀察', side: 'down', steady: false },
+  BEARISH_CONFIRMED: { label: '跌破確認', short: '跌破確認', side: 'down', steady: false },
+  BREAKDOWN_FAILED: { label: '跌破未確認', short: '跌破未成立', side: 'up', steady: false },
+  BELOW: { label: '均線之下', short: '均線下', side: 'down', steady: true },
+  WATCH_BREAKOUT: { label: '突破觀察中', short: '突破觀察', side: 'up', steady: false },
+  BULLISH_CONFIRMED: { label: '突破確認', short: '突破確認', side: 'up', steady: false },
+  BREAKOUT_FAILED: { label: '突破未確認', short: '突破未成立', side: 'down', steady: false },
+  ABOVE: { label: '均線之上', short: '均線上', side: 'up', steady: true },
+  UNKNOWN: { label: '資料不足', short: '資料不足', side: 'flat', steady: true },
 };
 
 /** 數字格式化，僅用於敘述文字。 */
