@@ -170,6 +170,154 @@ export function maStance(candles, period) {
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* 回測：二日法則到底有沒有用                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 台股單趟來回的交易成本：買進手續費 0.1425% 加賣出證交稅 0.3%。
+ * 與 indicators.js 的回測採同一個數字，兩邊的結果才能直接比較。
+ */
+const FEE_RATE = 0.004425;
+
+/**
+ * 以訊號函式跑一次只做多的回測。
+ *
+ * 兩個與 indicators.js 相同的關鍵約定：
+ * 1. **隔日開盤成交。** 訊號要到當日收盤才成立，用當日收盤價成交等於使用未來資訊。
+ * 2. **逐日結算帳面權益。** 只在平倉時取樣，一組全部獲利出場的參數會算出零回檔，
+ *    但持倉期間可能經歷過三成的帳面虧損，那才是實際會讓人出場的數字。
+ *
+ * @param {object[]} candles
+ * @param {number} start 開始判定訊號的索引
+ * @param {(i:number) => 'buy'|'sell'|null} signalAt
+ * @returns {object}
+ */
+function runLongOnly(candles, start, signalAt, startLong = false) {
+  const closes = candles.map((c) => c.close);
+  let equity = 1;
+  let peak = 1;
+  let maxDrawdown = 0;
+  // 起點若已站上均線就視為持有中。
+  //
+  // 只認穿越事件是不夠的：一檔從頭到尾都在均線之上、期間從未跌破的股票，
+  // 純事件驅動的模型會全程空手、報酬掛零，把一個順風的走勢算成沒有績效。
+  // 穿越是狀態的「轉換點」，不是狀態本身。
+  let entryPrice = startLong ? (candles[start + 1]?.open ?? closes[start]) : null;
+  let trades = 0;
+  let wins = 0;
+  let barsHeld = 0;
+
+  const markToMarket = (close) => {
+    const value = entryPrice === null ? equity : equity * (close / entryPrice) * (1 - FEE_RATE);
+    peak = Math.max(peak, value);
+    maxDrawdown = Math.max(maxDrawdown, (peak - value) / peak);
+  };
+
+  for (let i = start; i < candles.length - 1; i += 1) {
+    const signal = signalAt(i);
+    const nextOpen = candles[i + 1].open ?? candles[i + 1].close;
+
+    if (signal === 'buy' && entryPrice === null) {
+      entryPrice = nextOpen;
+    } else if (signal === 'sell' && entryPrice !== null) {
+      const netReturn = (nextOpen / entryPrice) * (1 - FEE_RATE);
+      equity *= netReturn;
+      trades += 1;
+      if (netReturn > 1) wins += 1;
+      entryPrice = null;
+    }
+
+    if (entryPrice !== null) barsHeld += 1;
+    markToMarket(closes[i]);
+  }
+
+  // 結束時仍持有部位，以最後收盤價結算，否則會漏掉尚未平倉的盈虧。
+  if (entryPrice !== null) {
+    const netReturn = (closes[closes.length - 1] / entryPrice) * (1 - FEE_RATE);
+    equity *= netReturn;
+    trades += 1;
+    if (netReturn > 1) wins += 1;
+  }
+  markToMarket(closes[closes.length - 1]);
+
+  const span = candles.length - 1 - start;
+  return {
+    totalReturn: (equity - 1) * 100,
+    trades,
+    winRate: trades === 0 ? null : (wins / trades) * 100,
+    maxDrawdown: maxDrawdown * 100,
+    // 在市場中的時間比例。報酬相近時，持倉時間較短的那個承擔的風險較小。
+    exposure: span <= 0 ? null : (barsHeld / span) * 100,
+  };
+}
+
+/**
+ * 比較同一條均線下的三種做法。
+ *
+ * **對照組是「單純均線」，不是只有買進持有。** 二日法則本質上是在均線訊號上
+ * 多加一道確認，因此要回答的問題是「那道確認有沒有讓結果變好」，
+ * 而不是「跟著均線做贏不贏得過不動」。只跟買進持有比，
+ * 會把均線本身的效果誤算成二日法則的功勞。
+ *
+ * @param {object[]} candles
+ * @param {number} period 均線天數
+ * @returns {object|null} 資料不足時回傳 null
+ */
+export function compareStanceStrategies(candles, period) {
+  // 需要均線成形，加上訊號判定要回看兩根，再留一段樣本才有意義。
+  if (!Array.isArray(candles) || period <= 0 || candles.length < period + 30) return null;
+
+  const closes = candles.map((c) => c.close);
+  const line = sma(closes, period);
+  const start = period + 1;
+
+  const crossedUpAt = (i) =>
+    line[i] !== null && line[i - 1] !== null && closes[i] > line[i] && closes[i - 1] <= line[i - 1];
+  const crossedDownAt = (i) =>
+    line[i] !== null && line[i - 1] !== null && closes[i] < line[i] && closes[i - 1] >= line[i - 1];
+
+  // 二日法則：穿越的隔一天要再創高（或破低）才算確認，訊號因此晚一天。
+  const startLong = line[start] !== null && closes[start] > line[start];
+
+  const twoDay = runLongOnly(
+    candles,
+    start,
+    (i) => {
+      if (crossedUpAt(i - 1) && candles[i].high > candles[i - 1].high) return 'buy';
+      if (crossedDownAt(i - 1) && candles[i].low < candles[i - 1].low) return 'sell';
+      return null;
+    },
+    startLong
+  );
+
+  // 單純均線：收盤穿越當天就動作，沒有確認這一關。
+  const plain = runLongOnly(
+    candles,
+    start,
+    (i) => {
+      if (crossedUpAt(i)) return 'buy';
+      if (crossedDownAt(i)) return 'sell';
+      return null;
+    },
+    startLong
+  );
+
+  const buyHold = (closes[closes.length - 1] / closes[start] - 1) * 100;
+
+  return {
+    period,
+    from: candles[start].date,
+    to: candles[candles.length - 1].date,
+    twoDay,
+    plain,
+    buyHold,
+    // 二日法則相對單純均線的差距，正值代表那道確認有加分。
+    edgeVsPlain: twoDay.totalReturn - plain.totalReturn,
+    edgeVsBuyHold: twoDay.totalReturn - buyHold,
+  };
+}
+
 /**
  * 同時判定短、長兩條均線的狀態。
  *

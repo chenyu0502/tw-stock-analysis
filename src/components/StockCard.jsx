@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { ChevronDown, ChevronUp, Trash2, Wand2 } from 'lucide-react';
 import { loadHistory, loadInstitutionalHistory } from '../store/marketSlice.js';
 import { crossState, kd, macd, rsi, bias, atr, optimizeMaPeriods } from '../lib/indicators.js';
 import { num, pct, int, changeColor, stateColor } from '../lib/format.js';
-import { maStances, STANCE_LABEL } from '../lib/stance.js';
+import { maStances, STANCE_LABEL, compareStanceStrategies } from '../lib/stance.js';
 import PriceChart from './PriceChart.jsx';
 import InstitutionalChart from './InstitutionalChart.jsx';
 
@@ -221,6 +221,7 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
                     <StanceRow tag="短期波動" data={analysis.stances.short} />
                     <StanceRow tag="長期波段" data={analysis.stances.long} />
                   </div>
+                  <StanceBacktest candles={candles} periods={[item.maShort, item.maLong]} />
                   <p className="mt-1.5 text-[10px] leading-relaxed text-slate-600">
                     二日法則：收盤穿越均線當天只算警戒，隔日最低（或最高）價再突破前一日，
                     才視為確認。只認收盤價的穿越，盤中戳破不計。
@@ -329,6 +330,93 @@ function StanceBadge({ tag, data }) {
     <span className={`rounded border px-1.5 py-0.5 text-[11px] ${style}`} title={data.description}>
       {tag}·{meta.short}
     </span>
+  );
+}
+
+/**
+ * 二日法則的回測對照。
+ *
+ * **對照組是「單純均線」，不只是買進持有。** 二日法則本質上是在均線訊號上
+ * 多加一道確認，要回答的問題是「那道確認有沒有讓結果變好」；
+ * 只跟買進持有比，會把均線本身的效果誤算成二日法則的功勞。
+ *
+ * 回測是同步運算，但資料量只有兩三百根 K 棒、兩個均線週期，
+ * 耗時遠低於一次重繪，不需要另外做非同步處理。
+ */
+function StanceBacktest({ candles, periods }) {
+  const results = useMemo(
+    () =>
+      [...new Set(periods)]
+        .map((p) => compareStanceStrategies(candles, p))
+        .filter(Boolean),
+    [candles, periods]
+  );
+
+  if (results.length === 0) return null;
+
+  return (
+    <div className="mt-2">
+      <div className="text-[11px] text-slate-500">
+        回測對照（{results[0].from} 起）
+      </div>
+      <div className="mt-1 overflow-x-auto">
+        <table className="w-full text-[11px]">
+          <thead>
+            <tr className="text-slate-600">
+              <th className="pb-1 text-left font-normal">均線／做法</th>
+              <th className="pb-1 text-right font-normal">報酬率</th>
+              <th className="pb-1 text-right font-normal">交易</th>
+              <th className="pb-1 text-right font-normal">勝率</th>
+              <th className="pb-1 text-right font-normal">最大回檔</th>
+              <th className="pb-1 text-right font-normal">持倉比例</th>
+            </tr>
+          </thead>
+          <tbody className="tabular">
+            {results.map((r) => (
+              <Fragment key={r.period}>
+                <tr className="border-t border-slate-800/60">
+                  <td className="py-1 text-slate-300">{r.period} 日 · 二日法則</td>
+                  <BacktestCells data={r.twoDay} />
+                </tr>
+                <tr>
+                  <td className="py-1 text-slate-500">{r.period} 日 · 單純均線</td>
+                  <BacktestCells data={r.plain} />
+                </tr>
+              </Fragment>
+            ))}
+            <tr className="border-t border-slate-700">
+              <td className="py-1 text-slate-400">買進持有</td>
+              <td className={`py-1 text-right ${changeColor(results[0].buyHold)}`}>
+                {pct(results[0].buyHold, 1, true)}
+              </td>
+              <td className="py-1 text-right text-slate-600" colSpan={4}>
+                同期間對照
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-1.5 text-[10px] leading-relaxed text-slate-600">
+        隔日開盤成交，含手續費與證交稅，最大回檔逐日結算。
+        關鍵是與「單純均線」相比——那才看得出二日法則的那道確認有沒有加分；
+        只跟買進持有比會把均線本身的效果算進來。
+        回測僅為歷史統計，不保證未來結果。
+      </p>
+    </div>
+  );
+}
+
+function BacktestCells({ data }) {
+  return (
+    <>
+      <td className={`py-1 text-right ${changeColor(data.totalReturn)}`}>
+        {pct(data.totalReturn, 1, true)}
+      </td>
+      <td className="py-1 text-right text-slate-400">{int(data.trades)}</td>
+      <td className="py-1 text-right text-slate-400">{pct(data.winRate, 0)}</td>
+      <td className="py-1 text-right text-slate-400">{pct(-data.maxDrawdown, 1)}</td>
+      <td className="py-1 text-right text-slate-400">{pct(data.exposure, 0)}</td>
+    </>
   );
 }
 
