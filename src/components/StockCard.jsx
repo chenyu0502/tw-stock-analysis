@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp, Trash2, Wand2 } from 'lucide-react';
 import { loadHistory, loadInstitutionalHistory } from '../store/marketSlice.js';
 import { crossState, kd, macd, rsi, bias, atr, optimizeMaPeriods } from '../lib/indicators.js';
 import { num, pct, int, changeColor, stateColor } from '../lib/format.js';
+import { maStances, STANCE_LABEL } from '../lib/stance.js';
 import PriceChart from './PriceChart.jsx';
 import InstitutionalChart from './InstitutionalChart.jsx';
 
@@ -57,6 +58,9 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
 
     return {
       cross: crossState(closes, item.maShort, item.maLong),
+      // 二日法則狀態。與 cross 的差別是時序：cross 說「兩條均線誰在上」，
+      // 這個說「跌破第幾天、確認了沒有」。
+      stances: maStances(candles, item.maShort, item.maLong),
       k: k[last],
       d: d[last],
       dif: dif[last],
@@ -196,6 +200,22 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
                 </div>
               )}
 
+              {/* 二日法則狀態 */}
+              {analysis?.stances && (analysis.stances.short || analysis.stances.long) && (
+                <div className="mb-3">
+                  <h4 className="mb-1.5 text-xs font-medium text-slate-400">均線攻守狀態</h4>
+                  <div className="space-y-1.5">
+                    <StanceRow tag="短期波動" data={analysis.stances.short} />
+                    <StanceRow tag="長期波段" data={analysis.stances.long} />
+                  </div>
+                  <p className="mt-1.5 text-[10px] leading-relaxed text-slate-600">
+                    二日法則：收盤穿越均線當天只算警戒，隔日最低（或最高）價再突破前一日，
+                    才視為確認。只認收盤價的穿越，盤中戳破不計。
+                    這是常見的交易慣例，非經證實的方法；此處只描述狀態，不建議任何動作。
+                  </p>
+                </div>
+              )}
+
               {/* 技術指標 */}
               {analysis && (
                 <Section title="技術指標">
@@ -270,6 +290,36 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
 }
 
 /** 指標分組容器。 */
+/**
+ * 二日法則狀態的顏色。
+ *
+ * 沿用台股紅漲綠跌：站上／突破為紅、跌破為綠。
+ * 「跌破未確認」歸為偏多側——那代表跌破沒有成立。
+ */
+const STANCE_STYLE = {
+  up: 'border-rose-500/40 bg-rose-500/10 text-rose-400',
+  down: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
+  flat: 'border-slate-600/50 bg-slate-700/20 text-slate-400',
+};
+
+function StanceRow({ tag, data }) {
+  if (!data) return null;
+  const meta = STANCE_LABEL[data.state] ?? STANCE_LABEL.UNKNOWN;
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] text-slate-500">
+          {tag}　{data.period} 日均線
+        </span>
+        <span className={`rounded border px-1.5 py-0.5 text-[11px] ${STANCE_STYLE[meta.side]}`}>
+          {meta.label}
+        </span>
+      </div>
+      <p className="tabular mt-1 text-[11px] leading-relaxed text-slate-400">{data.description}</p>
+    </div>
+  );
+}
+
 function Section({ title, children }) {
   return (
     <div>
