@@ -55,11 +55,31 @@ const initialState = {
    * 記下刪除這個動作本身，合併時據以濾除，刪除才會生效。
    * 追蹤標的與持股以代號為鍵，交易與資金流水以 id 為鍵。
    */
-  deleted: { watchlist: {}, holdings: {}, transactions: {}, cashFlows: {} },
+  deleted: {
+    watchlist: {},
+    holdings: {},
+    transactions: {},
+    cashFlows: {},
+    /**
+     * 「這一檔在某個時間點之前的進出紀錄全部刪除」，以代號為鍵。
+     *
+     * 只用 id 層級的墓碑不夠：清除當下只看得到本機那幾筆，
+     * 雲端若還有同一檔的其他紀錄（不同 id，例如來自另一台裝置或更早的工作階段），
+     * 就不在名單裡，合併時照樣回來——症狀正是「清除了又出現」。
+     * 記成代號層級才涵蓋得到那些沒見過的 id。
+     */
+    transactionCodes: {},
+  },
 };
 
 /** 墓碑的集合名稱，用於初始化與合併時逐一處理。 */
-export const DELETABLE = ['watchlist', 'holdings', 'transactions', 'cashFlows'];
+export const DELETABLE = [
+  'watchlist',
+  'holdings',
+  'transactions',
+  'cashFlows',
+  'transactionCodes',
+];
 
 /** 標記一筆刪除。 */
 function markDeleted(state, collection, key) {
@@ -160,6 +180,9 @@ const portfolioSlice = createSlice({
       state.transactions.push({
         id: nanoid(),
         code,
+        // 建立時間。代號層級的墓碑靠它判斷「這筆是刪除之後才記的」，
+        // 沒有它的話，清除過的標的之後再記交易會被墓碑一併濾掉。
+        addedAt: Date.now(),
         date,
         shares,
         price,
@@ -220,11 +243,14 @@ const portfolioSlice = createSlice({
     dropTransactionsForCodes(state, action) {
       const codes = new Set(action.payload ?? []);
       if (codes.size === 0) return;
-      // 墓碑以 id 為鍵，因此要逐筆標記，不能只記代號——
-      // 之後若又為同一檔新增交易，那筆新紀錄的 id 不同，不會被誤濾。
+      // 兩種墓碑都要立。
+      //
+      // id 層級涵蓋當下看得到的紀錄；代號層級涵蓋雲端可能還存在、
+      // 但本機從未見過的其他 id——只立前者就會出現「清除了又出現」。
       for (const t of state.transactions) {
         if (codes.has(t.code)) markDeleted(state, 'transactions', t.id);
       }
+      for (const code of codes) markDeleted(state, 'transactionCodes', code);
       state.transactions = state.transactions.filter((t) => !codes.has(t.code));
     },
 

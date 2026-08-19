@@ -49,13 +49,19 @@ export function mergePortfolio(local, cloud) {
     cashFlows: [],
     cash: 0,
     statsStartDate: null,
-    deleted: { watchlist: {}, holdings: {}, transactions: {}, cashFlows: {} },
+    deleted: {
+      watchlist: {},
+      holdings: {},
+      transactions: {},
+      cashFlows: {},
+      transactionCodes: {},
+    },
   };
   if (!cloud) return local ?? empty;
   if (!local) return cloud;
 
   const deleted = {};
-  for (const name of ['watchlist', 'holdings', 'transactions', 'cashFlows']) {
+  for (const name of ['watchlist', 'holdings', 'transactions', 'cashFlows', 'transactionCodes']) {
     deleted[name] = mergeTombstones(local.deleted?.[name], cloud.deleted?.[name]);
   }
 
@@ -71,7 +77,7 @@ export function mergePortfolio(local, cloud) {
    * 症狀是「新增後重開又不見了」，與原本的問題剛好相反。
    * 建立時間晚於刪除時間就代表這是新的一筆，墓碑不適用。
    *
-   * 交易與資金流水沒有建立時間，但它們的 id 是 nanoid，重新加入必定產生新的 id，
+   * 交易帶有 addedAt；資金流水沒有，但它們的 id 是 nanoid，重新加入必定產生新的 id，
    * 不可能與舊墓碑相撞，因此一律套用墓碑是安全的。
    */
   const merge = (a = [], b = [], keyField, tombstones, newer) => {
@@ -102,13 +108,18 @@ export function mergePortfolio(local, cloud) {
   return {
     watchlist,
     holdings,
-    transactions: merge(
-      local.transactions,
-      cloud.transactions,
-      'id',
-      deleted.transactions,
-      keepFirst
-    ).sort(byDate),
+    // 交易另外套一層代號層級的墓碑。
+    //
+    // 「清除某幾檔的全部進出紀錄」是代號層級的意圖，只記下當時看得到的 id 不夠：
+    // 雲端可能還有同一檔的其他 id（來自另一台裝置或更早的工作階段），
+    // 那些不在 id 名單裡，合併時會照樣回來——就是「清除了又出現」。
+    // 清除之後才記的交易帶有較新的 addedAt，不受影響。
+    transactions: merge(local.transactions, cloud.transactions, 'id', deleted.transactions, keepFirst)
+      .filter((t) => {
+        const clearedAt = deleted.transactionCodes[String(t.code)];
+        return !clearedAt || (t.addedAt ?? 0) > clearedAt;
+      })
+      .sort(byDate),
     cashFlows: merge(local.cashFlows, cloud.cashFlows, 'id', deleted.cashFlows, keepFirst).sort(
       byDate
     ),

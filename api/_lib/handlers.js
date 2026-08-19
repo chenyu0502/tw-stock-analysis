@@ -540,7 +540,14 @@ export async function historyHandler(query) {
 
         // 近幾個交易日改以證交所與櫃買的官方行情為準，Yahoo 只作為更早期資料的來源。
         // 這一步同時處理 Yahoo 的缺值與錯值，兩種情況都出現過。
-        const recent = raw.slice(-OFFICIAL_CLOSE_DAYS);
+        // 只校正「今天以前」的日期。
+        //
+        // 官方收盤行情要等收盤後才會公布，盤中查今天必然是空的——
+        // 空結果會被標成不完整而只快取一分鐘，於是每分鐘重抓一次全市場行情，
+        // 是純粹的浪費，也是最容易讓整個請求逾時的一段。
+        // 而今天那根 K 棒在權益曲線裡本來就會被即時報價覆蓋，根本用不到官方值。
+        const todayIso = new Date().toISOString().slice(0, 10);
+        const recent = raw.slice(-OFFICIAL_CLOSE_DAYS).filter((c) => c.date < todayIso);
         const officialQuotes = await Promise.all(
           recent.map((c) => loadDailyQuotes(c.date, suffix === '.TWO' ? 'OTC' : 'TSE'))
         );
