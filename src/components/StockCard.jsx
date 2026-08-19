@@ -5,6 +5,7 @@ import { loadHistory, loadInstitutionalHistory } from '../store/marketSlice.js';
 import { crossState, kd, macd, rsi, bias, atr, optimizeMaPeriods } from '../lib/indicators.js';
 import { num, pct, int, changeColor, stateColor } from '../lib/format.js';
 import { maStances, STANCE_LABEL, compareStanceStrategies } from '../lib/stance.js';
+import { detectPattern } from '../lib/patterns.js';
 import PriceChart from './PriceChart.jsx';
 import InstitutionalChart from './InstitutionalChart.jsx';
 
@@ -70,6 +71,9 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
       // 二日法則狀態。與 cross 的差別是時序：cross 說「兩條均線誰在上」，
       // 這個說「跌破第幾天、確認了沒有」。
       stances: maStances(candles, item.maShort, item.maLong),
+      // 價格型態。由擺盪轉折點推得，與均線狀態互不相干：
+      // 一檔可以同時是「跌破確認」與「收斂三角」。
+      pattern: detectPattern(candles),
       k: k[last],
       d: d[last],
       dif: dif[last],
@@ -124,6 +128,14 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
                 </span>
                 <StanceBadge tag="短" data={analysis.stances?.short} />
                 <StanceBadge tag="長" data={analysis.stances?.long} />
+                {analysis.pattern && analysis.pattern.name !== '型態未明' && (
+                  <span
+                    className="rounded border border-sky-700/50 bg-sky-950/40 px-1.5 py-0.5 text-[11px] text-sky-300"
+                    title={analysis.pattern.evidence}
+                  >
+                    {analysis.pattern.name}
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -216,16 +228,18 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
               {/* 二日法則狀態 */}
               {analysis?.stances && (analysis.stances.short || analysis.stances.long) && (
                 <div className="mb-3">
-                  <h4 className="mb-1.5 text-xs font-medium text-slate-400">均線攻守狀態</h4>
+                  <h4 className="mb-1.5 text-xs font-medium text-slate-400">型態與攻守</h4>
                   <div className="space-y-1.5">
+                    <PatternRow data={analysis.pattern} />
                     <StanceRow tag="短期波動" data={analysis.stances.short} />
                     <StanceRow tag="長期波段" data={analysis.stances.long} />
                   </div>
                   <StanceBacktest candles={candles} periods={[item.maShort, item.maLong]} />
                   <p className="mt-1.5 text-[10px] leading-relaxed text-slate-600">
+                    型態由擺盪轉折點的相對位置推得，條件不明確時一律回報「型態未明」，不硬湊。
                     二日法則：收盤穿越均線當天只算警戒，隔日最低（或最高）價再突破前一日，
-                    才視為確認。只認收盤價的穿越，盤中戳破不計。
-                    這是常見的交易慣例，非經證實的方法；此處只描述狀態，不建議任何動作。
+                    才視為確認，只認收盤價的穿越。
+                    兩者都是常見的交易慣例、非經證實的方法；此處只描述狀態，不建議任何動作。
                   </p>
                 </div>
               )}
@@ -322,6 +336,35 @@ const STANCE_STYLE = {
  * 持續狀態（均線上／均線下）調暗，剛跌破或剛確認的才用顏色跳出來。
  * 二十幾檔裡多數會停在持續狀態，全部上色等於沒有重點。
  */
+/**
+ * 價格型態。
+ *
+ * 與均線狀態互不相干，因此獨立一列：一檔可以同時是「跌破確認」與「收斂三角」，
+ * 前者講的是與均線的關係，後者講的是高低點的結構。
+ */
+function PatternRow({ data }) {
+  if (!data) return null;
+  const unknown = data.name === '型態未明';
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] text-slate-500">價格型態</span>
+        <span
+          className={`rounded border px-1.5 py-0.5 text-[11px] ${
+            unknown
+              ? 'border-slate-700/60 bg-slate-800/40 text-slate-500'
+              : 'border-sky-700/50 bg-sky-950/40 text-sky-300'
+          }`}
+        >
+          {data.name}
+        </span>
+      </div>
+      <p className="tabular mt-1 text-[11px] leading-relaxed text-slate-400">{data.evidence}</p>
+      {data.note && <p className="mt-0.5 text-[11px] leading-relaxed text-sky-400/70">{data.note}</p>}
+    </div>
+  );
+}
+
 function StanceBadge({ tag, data }) {
   if (!data) return null;
   const meta = STANCE_LABEL[data.state] ?? STANCE_LABEL.UNKNOWN;
