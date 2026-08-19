@@ -15,6 +15,7 @@ import { positionSummary } from '../../lib/performance.js';
 import { money, pct, num, int, changeColor } from '../../lib/format.js';
 import StockCard from '../StockCard.jsx';
 import ExDividendNotice from '../ExDividendNotice.jsx';
+import RiskScan from '../RiskScan.jsx';
 
 /** 單一標的市值佔比超過此門檻即提出集中度警示。 */
 const CONCENTRATION_THRESHOLD = 30;
@@ -163,6 +164,8 @@ export default function HoldingsTab() {
       </div>
 
       <ExDividendNotice holdings={holdings} exDividend={exDividend} />
+
+      <RiskScan holdings={holdings} />
 
       {concentrated.length > 0 && (
         <div className="flex items-start gap-2 rounded-xl border border-amber-800/60 bg-amber-950/30 p-3 text-xs text-amber-300">

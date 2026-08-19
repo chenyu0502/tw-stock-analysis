@@ -29,6 +29,29 @@ export const THRESHOLDS = {
   pricePositionHigh: 90,
   /** 券資比（%） */
   shortMarginRatioHigh: 30,
+  /**
+   * 融資暴增：張數與增幅要同時達標。
+   *
+   * 只看張數會讓大型股天天觸發（融資餘額本來就數萬張），
+   * 只看增幅則小型股一點風吹草動就報警。兩個都要才有意義。
+   */
+  marginSurgeLots: 500,
+  marginSurgePercent: 20,
+  /** 融券暴增 */
+  shortSurgeLots: 200,
+  shortSurgePercent: 30,
+  /** 資券同增：兩邊都增加超過此比例 */
+  bothRisePercent: 10,
+  /** 融券大量回補的張數 */
+  shortCoverLots: 200,
+  /**
+   * 資增券減的門檻。
+   *
+   * 參考站這一條沒有設幅度門檻，於是「融資多一張、融券少一張」也算數——
+   * 實測五檔就有兩檔觸發，等於天天在響。加上幅度要求才篩得出真正的異常。
+   */
+  marginUpPercent: 3,
+  shortDownPercent: -20,
   /** 月營收年增率（%），低於此值視為衰退 */
   revenueYoyWeak: 0,
   /** 毛利率較去年同期下滑的百分點 */
@@ -91,6 +114,7 @@ function n(value, digits = 1) {
  * @param {object|null} [params.indicators] analysisInput 的 indicators
  * @param {object|null} [params.recent] analysisInput 的 recent
  * @param {object|null} [params.chips] analysisInput 的 chips
+ * @param {object|null} [params.margin] /api/margin 的單檔資料，供融資融券規則使用
  * @param {object[]} [params.chipSeries] 法人買賣超歷史，用於連續賣超判斷
  * @param {object|null} [params.dividendSchedule] 即將除權息 { date, cash, stock, kind }
  * @param {string|null} [params.today] 今日日期，供測試固定時間
@@ -101,6 +125,7 @@ export function detectRisks({
   indicators = null,
   recent = null,
   chips = null,
+  margin = null,
   chipSeries = [],
   dividendSchedule = null,
   today = null,
@@ -200,10 +225,12 @@ export function detectRisks({
       )
     );
   }
-  const ratio = chips?.margin?.shortMarginRatio;
+  const ratio = chips?.margin?.shortMarginRatio ?? margin?.shortMarginRatio;
   if (Number.isFinite(ratio) && ratio >= THRESHOLDS.shortMarginRatioHigh) {
     out.push(risk('short-margin', 'low', '籌碼面', `券資比 ${n(ratio)}%，空方力道偏高`));
   }
+
+  out.push(...marginAnomalies(margin));
 
   /* --- 基本面 --- */
   const revenue = fundamentals?.revenue;
@@ -305,6 +332,107 @@ export function describeExDividend(schedule, today = null) {
     `${when}除${schedule.kind || '息'}，${amount}。` +
       `當日股價會扣除該金額，帳面市值同步下降，現金約一個多月後入帳`
   );
+}
+
+/**
+ * 融資融券的異常變化。
+ *
+ * **只陳述事實，不標示多空方向。** 融資暴增有人讀成散戶追高、有人讀成資金流入，
+ * 沒有共識；把其中一種解讀寫死在介面上，等於替使用者做了判斷。
+ * 這裡只講「增加多少張、增幅多少」，方向留給使用者。
+ *
+ * ETF 與非信用交易個股沒有這些資料，回傳空陣列而不是零——
+ * 「沒有資料」與「沒有異常」是兩件事。
+ *
+ * @param {object|null} m /api/margin 的單檔資料
+ * @returns {object[]}
+ */
+function marginAnomalies(m) {
+  if (!m) return [];
+  const out = [];
+  const lots = (v) => (Number.isFinite(v) ? Math.round(v).toLocaleString('zh-TW') : '—');
+
+  const mc = m.marginChange;
+  const mp = m.marginChangePercent;
+  const sc = m.shortChange;
+  const sp = m.shortChangePercent;
+
+  if (
+    Number.isFinite(mc) &&
+    Number.isFinite(mp) &&
+    mc >= THRESHOLDS.marginSurgeLots &&
+    mp >= THRESHOLDS.marginSurgePercent
+  ) {
+    out.push(
+      risk(
+        'margin-surge',
+        'medium',
+        '籌碼面',
+        `融資單日增加 ${lots(mc)} 張（增幅 ${n(mp)}%），餘額來到 ${lots(m.marginBalance)} 張`
+      )
+    );
+  }
+
+  if (
+    Number.isFinite(sc) &&
+    Number.isFinite(sp) &&
+    sc >= THRESHOLDS.shortSurgeLots &&
+    sp >= THRESHOLDS.shortSurgePercent
+  ) {
+    out.push(
+      risk(
+        'short-surge',
+        'medium',
+        '籌碼面',
+        `融券單日增加 ${lots(sc)} 張（增幅 ${n(sp)}%），餘額來到 ${lots(m.shortBalance)} 張`
+      )
+    );
+  }
+
+  if (
+    Number.isFinite(mp) &&
+    Number.isFinite(sp) &&
+    mp > THRESHOLDS.bothRisePercent &&
+    sp > THRESHOLDS.bothRisePercent
+  ) {
+    out.push(
+      risk(
+        'margin-short-both-up',
+        'low',
+        '籌碼面',
+        `融資與融券同步增加（融資 ${n(mp)}%、融券 ${n(sp)}%），多空雙方同時加碼`
+      )
+    );
+  }
+
+  if (
+    Number.isFinite(mp) &&
+    Number.isFinite(sp) &&
+    mp > THRESHOLDS.marginUpPercent &&
+    sp < THRESHOLDS.shortDownPercent
+  ) {
+    out.push(
+      risk(
+        'margin-up-short-down',
+        'low',
+        '籌碼面',
+        `融資增加 ${n(mp)}%、融券減少 ${n(Math.abs(sp))}%`
+      )
+    );
+  }
+
+  if (Number.isFinite(sc) && -sc >= THRESHOLDS.shortCoverLots) {
+    out.push(
+      risk(
+        'short-cover',
+        'low',
+        '籌碼面',
+        `融券單日減少 ${lots(-sc)} 張，餘額剩 ${lots(m.shortBalance)} 張`
+      )
+    );
+  }
+
+  return out;
 }
 
 /**
