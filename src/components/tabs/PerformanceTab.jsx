@@ -299,6 +299,7 @@ export default function PerformanceTab() {
             <thead>
               <tr className="text-slate-500">
                 <th className="pb-2 text-left font-normal">標的</th>
+                <th className="pb-2 text-right font-normal">現價</th>
                 <th className="pb-2 text-right font-normal">股數</th>
                 <th className="pb-2 text-right font-normal">漲跌</th>
                 <th className="pb-2 text-right font-normal">幅度</th>
@@ -317,6 +318,7 @@ export default function PerformanceTab() {
                       </span>
                     )}
                   </td>
+                  <td className="py-1.5 text-right text-slate-300">{num(item.price)}</td>
                   <td className="py-1.5 text-right text-slate-400">{int(item.shares)}</td>
                   <td className={`py-1.5 text-right ${changeColor(item.change)}`}>{num(item.change)}</td>
                   <td className={`py-1.5 text-right ${changeColor(item.change)}`}>
@@ -326,7 +328,7 @@ export default function PerformanceTab() {
                 </tr>
               ))}
               <tr className="border-t border-slate-700">
-                <td className="py-1.5 text-slate-400" colSpan={4}>
+                <td className="py-1.5 text-slate-400" colSpan={5}>
                   合計
                 </td>
                 <td className={`tabular py-1.5 text-right font-medium ${changeColor(today.total)}`}>

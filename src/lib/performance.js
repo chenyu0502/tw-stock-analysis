@@ -586,6 +586,8 @@ export function todayPnl(holdings, quotes, transactions = [], todayDate = null) 
       code,
       // 名稱留空由顯示層決定如何呈現，回填代號會讓介面出現「64886488」。
       name: quote?.name ?? '',
+      // 現價與漲跌同源，一併帶出讓介面能顯示，也方便與券商畫面逐列對照。
+      price,
       shares,
       sharesAtOpen,
       tradedShares,
