@@ -6,7 +6,7 @@ import { detectRisks, SEVERITY } from '../lib/risks.js';
 import { buildAnalysisInput } from '../lib/analysisInput.js';
 import { today as todayDate, DEFAULT_MA } from '../store/portfolioSlice.js';
 import ScanPanel from './ScanPanel.jsx';
-import MarginQuadrant from './MarginQuadrant.jsx';
+import MarginTable from './MarginTable.jsx';
 import StanceOverview from './StanceOverview.jsx';
 import ValuationOverview from './ValuationOverview.jsx';
 
@@ -145,7 +145,7 @@ export default function RiskScan({ holdings }) {
         }
         defaultOpen={split.margin.length > 0}
       >
-        <MarginQuadrant holdings={holdings} marginMap={marginMap} quotes={quotes} />
+        <MarginTable holdings={holdings} marginMap={marginMap} quotes={quotes} />
         {split.margin.length > 0 && (
           <div className="mt-3 space-y-2">
             {split.margin.map((row) => (
@@ -181,7 +181,7 @@ export default function RiskScan({ holdings }) {
         defaultOpen={split.valuation.length > 0}
       >
         <ValuationOverview holdings={holdings} />
-        {/* 與融資融券面板一致：圖上看得到位置，觸發的項目仍要有文字說明。 */}
+        {/* 與融資融券面板一致：表上看得到數字，觸發的項目仍要有文字說明。 */}
         {split.valuation.length > 0 && (
           <div className="mt-3 space-y-2">
             {split.valuation.map((row) => (
