@@ -60,7 +60,11 @@ export function normalizeTransactions(holdings, transactions, statsStartDate = n
       code: h.code,
       date: statsStartDate || h.openedAt || toDateString(h.addedAt ?? Date.now()),
       shares: h.shares,
-      price: h.avgCost,
+      // 匯入的持股可能沒有成本均價。若原樣帶入 undefined，權益曲線在累計現金變動時
+      // 會算出 NaN，而 NaN 會擴散到整條曲線——月曆每一格、當月損益、年度報酬全部變成
+      // NaN 或破折號，畫面上完全看不出是「有一檔缺成本」造成的。
+      // 補零的意思是「不知道當初付了多少」：現金回推會失準，但其餘數字仍然可用。
+      price: Number.isFinite(h.avgCost) ? h.avgCost : 0,
       fee: 0,
       realized: null,
       synthetic: true,
@@ -257,6 +261,24 @@ export function buildEquityCurve({
   // 除息日仍然一致：即時報價的昨收是除息參考價，而曲線是「原始昨收 − 配息」，兩者相等。
   const liveDate = todayDate && dates[dates.length - 1] === todayDate ? todayDate : null;
 
+  // 完全沒有歷史股價的標的，整段用「即時報價推得的昨收」評價。
+  //
+  // 不這樣做的話，那一檔在今天之前的每一天都會落到價格 0，到了今天又突然以現價入帳，
+  // 整個部位的市值就變成當天的假性獲利——實測一檔兩萬股的 ETF 可以憑空多出六十幾萬，
+  // 月曆今天那格因此與「今日損益」差了一大截。這正是歷史股價載入失敗（例如 504）
+  // 之後會看到的現象，而且只會出現在今天那一格，很難聯想到是資料缺漏。
+  //
+  // 用昨收當基準後，過去每一天都是同一個價格、貢獻為零，今天則貢獻
+  // 「股數 × 當日漲跌」，與今日損益完全同一個口徑。
+  const fallbackPrice = {};
+  for (const code of codes) {
+    if (closeByCode[code].size > 0) continue;
+    const quote = quotes[code];
+    if (Number.isFinite(quote?.price) && Number.isFinite(quote?.change)) {
+      fallbackPrice[code] = quote.price - quote.change;
+    }
+  }
+
   // 先正推持股與現金變動量，再由目前現金往回推算每日現金。
   const held = { ...openingShares };
   const rows = [];
@@ -279,17 +301,25 @@ export function buildEquityCurve({
     for (const tx of todayTx) {
       held[tx.code] = (held[tx.code] ?? 0) + tx.shares;
       // 買進為資金流出（shares 為正），賣出為流入（shares 為負），手續費恆為流出。
-      cumulativeCashDelta -= tx.shares * tx.price + tx.fee;
+      // 單筆金額算不出來時以零計，不讓一筆壞資料把整條曲線變成 NaN。
+      const delta = tx.shares * tx.price + tx.fee;
+      cumulativeCashDelta -= Number.isFinite(delta) ? delta : 0;
     }
     const netFlow = flowByDate.get(date) ?? 0;
     cumulativeCashDelta += netFlow;
 
-    /** 當日評價用的價格：今日優先採即時報價，其次收盤價，再其次沿用前一日。 */
+    /**
+     * 當日評價用的價格。
+     *
+     * 順序：今日的即時報價 → 當日收盤價 → 缺歷史股價時的昨收基準 → 沿用前一日。
+     * 個股當日無報價（停牌或該檔資料起點較晚）時沿用前一日市值，避免淨值出現假跳空。
+     */
     const priceOf = (code) => {
       const live = date === liveDate ? quotes[code]?.price : null;
       const close = closeByCode[code].get(date);
-      // 個股當日無報價（停牌或該檔資料起點較晚）時沿用前一日市值，避免淨值出現假跳空。
-      return live ?? close ?? rows[rows.length - 1]?.priceByCode?.[code] ?? 0;
+      return (
+        live ?? close ?? fallbackPrice[code] ?? rows[rows.length - 1]?.priceByCode?.[code] ?? 0
+      );
     };
 
     let positionValue = 0;

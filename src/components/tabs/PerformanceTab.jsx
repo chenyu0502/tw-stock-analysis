@@ -105,6 +105,16 @@ export default function PerformanceTab() {
   );
   const mismatchCodes = Object.keys(shareMismatch);
 
+  // 完全沒有歷史股價的持股。
+  //
+  // 這種標的在曲線裡只能用即時報價推得的昨收評價，過去每一天都是同一個價格，
+  // 等於整段沒有損益。載入失敗（例如 history 回應 504）時就會這樣，
+  // 而且畫面上原本毫無跡象——月曆看起來只是「數字怪怪的」。
+  const noHistoryCodes = useMemo(
+    () => holdings.filter((h) => (history[h.code]?.candles?.length ?? 0) === 0).map((h) => h.code),
+    [holdings, history]
+  );
+
   const curveMonthly = useMemo(() => aggregateByMonth(curve), [curve]);
   const yearly = useMemo(() => aggregateByYear(curve), [curve]);
   const realized = useMemo(() => realizedSummary(transactions), [transactions]);
@@ -346,6 +356,13 @@ export default function PerformanceTab() {
         note="以每日收盤淨值變動計算。除息日已把「持股數 × 每股配息」計入，不會出現等於配息的假性虧損"
       >
         <PnlCalendar curve={curve} />
+        {noHistoryCodes.length > 0 && (
+          <p className="mt-2 rounded-lg border border-amber-900/60 bg-amber-950/30 px-2.5 py-2 text-[11px] leading-relaxed text-amber-400">
+            有 {noHistoryCodes.length} 檔尚未取得歷史股價（{noHistoryCodes.join('、')}），
+            這些標的在月曆中沒有每日損益，只有今天以現價計算。
+            回到持股頁或分析頁重新載入即可補齊；若持續失敗，多半是上游暫時取不到資料。
+          </p>
+        )}
       </Panel>
 
       {/* 每月損益走勢 */}
