@@ -234,6 +234,18 @@ function isoToCompact(iso) {
 }
 
 /**
+ * 台北時間的今天。
+ *
+ * 不能用 `new Date().toISOString()`——那是 UTC，比台北慢八小時。
+ * 台北凌晨到早上八點之間，UTC 還停在前一天，會把昨天那個已經收盤的
+ * 交易日誤判成「今天」而略過校正。伺服器可能跑在任何時區，不能靠本機時間。
+ * @returns {string} YYYY-MM-DD
+ */
+function taipeiToday() {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+/**
  * 取得近期的除權息資料，來源為證交所與櫃買中心。
  *
  * 為什麼不沿用 Yahoo 帶回的除權息事件：Yahoo 的事件表落後於價格。
@@ -392,6 +404,18 @@ function cellByField(fields, row, name) {
 }
 
 /**
+ * 同上，但取原始字串。日期欄位不能經過 toNumber。
+ * @param {string[]} fields
+ * @param {string[]} row
+ * @param {string} name
+ * @returns {string}
+ */
+function cellByFieldRaw(fields, row, name) {
+  const index = fields.indexOf(name);
+  return index === -1 ? '' : String(row[index] ?? '');
+}
+
+/**
  * 取得某一交易日的全市場官方行情。
  *
  * 存在的理由是 Yahoo 對台股 ETF 的日線不可靠，而且有兩種不同的壞法：
@@ -406,49 +430,67 @@ function cellByField(fields, row, name) {
  * 兩個市場分開查也分開快取。只持有上市股時不必去打櫃買，而且櫃買掛掉時
  * 上市的結果不會跟著被標成不完整、每分鐘重試一次。
  *
- * @param {string} isoDate YYYY-MM-DD
+ * **改成「單檔單月」而不是「全市場單日」是為了修 504。**
+ *
+ * 原本 TSE 走 `MI_INDEX?type=ALL`，那是**單日 4.5 MB、耗時 4.2 秒**的全市場行情，
+ * 而且校正三天就要打三次。一次開頁會同時查二十幾檔歷史，每檔在各自的
+ * serverless 實例上冷啟動（跨實例不共用記憶體快取），等於同時向證交所要
+ * 三百多 MB。上游一慢就撞上逾時，整個 /api/history 回 504。
+ *
+ * 改用單檔端點後：**2.4 KB、0.12 秒，而且一次涵蓋整個月**。
+ * 實測同一份資料，體積約為原本的一千九百分之一。
+ *
+ * @param {string} code 股票代號
  * @param {'TSE'|'OTC'} market
- * @returns {Promise<Record<string, {open:number|null, high:number|null, low:number|null, close:number}>>}
+ * @param {string} month YYYY-MM
+ * @returns {Promise<Map<string, {open:number|null, high:number|null, low:number|null, close:number}>>}
  */
-async function loadDailyQuotes(isoDate, market) {
-  return withPartialCache(`dailyquotes:${market}:${isoDate}`, TTL.DAILY, async () => {
-    // 兩個市場的網址、欄位名稱與日期格式全都不同，只有表格結構相同。
+async function loadOfficialMonth(code, market, month) {
+  return withPartialCache(`officialmonth:${market}:${code}:${month}`, TTL.DAILY, async () => {
+    const [year, mon] = month.split('-');
+    // 兩個市場的網址、日期格式與欄位名稱全都不同，只有「一個月一張表」的結構相同。
     const spec =
       market === 'OTC'
         ? {
             url:
-              `https://www.tpex.org.tw/www/zh-tw/afterTrading/otc` +
-              `?date=${encodeURIComponent(isoDate.replace(/-/g, '/'))}&type=EW&id=&response=json`,
-            close: '收盤',
+              `https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock` +
+              `?code=${encodeURIComponent(code)}&date=${year}/${mon}/01&id=&response=json`,
+            date: '日 期',
             open: '開盤',
             high: '最高',
             low: '最低',
+            close: '收盤',
           }
         : {
-            url: `${TWSE_RWD}/afterTrading/MI_INDEX?date=${isoToCompact(isoDate)}&type=ALL&response=json`,
-            close: '收盤價',
+            url:
+              `${TWSE_RWD}/afterTrading/STOCK_DAY` +
+              `?stockNo=${encodeURIComponent(code)}&date=${year}${mon}01&response=json`,
+            date: '日期',
             open: '開盤價',
             high: '最高價',
             low: '最低價',
+            close: '收盤價',
           };
 
-    const map = {};
+    const map = new Map();
     try {
-      const json = await fetchJson(spec.url, BULK_FETCH);
-      // 回應分成多張表，取含收盤價欄位的那一張。
-      for (const table of json?.tables ?? []) {
+      const json = await fetchJson(spec.url, OFFICIAL_FETCH);
+      // TWSE 把資料放在頂層的 fields/data，TPEx 放在 tables 陣列裡，兩種都要能讀。
+      const tables = json?.tables ?? (json?.fields ? [{ fields: json.fields, data: json.data }] : []);
+      for (const table of tables) {
         const fields = (table.fields ?? []).map((f) => String(f).trim());
         if (!fields.includes(spec.close)) continue;
         for (const row of table.data ?? []) {
-          const code = String(row[0] ?? '').trim();
+          const isoDate = rocToIso(cellByFieldRaw(fields, row, spec.date));
           const close = cellByField(fields, row, spec.close);
-          if (!code || close === null || close <= 0) continue;
-          map[code] = {
+          // 無成交的日子開高低收會是「--」，解析後為 null，整列跳過。
+          if (!isoDate || close === null || close <= 0) continue;
+          map.set(isoDate, {
             open: cellByField(fields, row, spec.open),
             high: cellByField(fields, row, spec.high),
             low: cellByField(fields, row, spec.low),
             close,
-          };
+          });
         }
         break;
       }
@@ -456,26 +498,34 @@ async function loadDailyQuotes(isoDate, market) {
       // 取不到就沿用 Yahoo 的數字，不讓整個歷史查詢失敗。
     }
 
-    // 空結果不視為完整，讓盤中查詢當日資料的情形能在收盤後很快重試。
-    return { value: map, complete: Object.keys(map).length > 0 };
+    // 空結果不視為完整，讓當月尚未有資料的情形能很快重試。
+    return { value: map, complete: map.size > 0 };
   });
 }
 
 /**
  * 以官方行情校正的交易日數。
  *
- * 只涵蓋最近幾天：對帳看的就是這幾天，而每多一天就要多打兩次上游，
- * 且每次回應都是全市場上千列。更早的資料 Yahoo 通常已經補正確。
+ * 只涵蓋最近幾天：對帳看的就是這幾天。更早的資料 Yahoo 通常已經補正確。
  *
- * 這個數字直接乘上冷啟動時的上游請求數，調大之前要先確認仍在 maxDuration 之內。
+ * 改用單檔單月端點後，這個數字不再乘上請求數——三天與三十天都是同一份月報表，
+ * 頂多在跨月時多打一次。
  */
 const OFFICIAL_CLOSE_DAYS = 3;
 
 /**
- * 全市場行情與除權息表的取用預算。
+ * 官方行情的取用預算。
  *
- * 這兩個上游的回應都是上千列，而且是每次冷啟動必打的。逾時設短、不重試，
- * 失敗就沿用 Yahoo 的數字——校正不到只是少一層修正，讓整個請求逾時卻是完全沒有資料。
+ * 單檔月報表只有兩三 KB、實測 0.12 秒，逾時給五秒已經很寬鬆，還可以重試一次。
+ * 這與先前的全市場行情不同——那個回應有 4.5 MB，只能設短逾時且不重試。
+ */
+const OFFICIAL_FETCH = { timeoutMs: 5000, retries: 1 };
+
+/**
+ * 除權息表的取用預算。
+ *
+ * 這幾個上游的回應是上千列，而且是每次冷啟動必打的。逾時設短、不重試，
+ * 失敗就少一層資訊，讓整個請求逾時卻是完全沒有資料。
  */
 const BULK_FETCH = { timeoutMs: 6000, retries: 0 };
 
@@ -547,14 +597,20 @@ export async function historyHandler(query) {
         // 空結果會被標成不完整而只快取一分鐘，於是每分鐘重抓一次全市場行情，
         // 是純粹的浪費，也是最容易讓整個請求逾時的一段。
         // 而今天那根 K 棒在權益曲線裡本來就會被即時報價覆蓋，根本用不到官方值。
-        const todayIso = new Date().toISOString().slice(0, 10);
+        const todayIso = taipeiToday();
         const recent = raw.slice(-OFFICIAL_CLOSE_DAYS).filter((c) => c.date < todayIso);
-        const officialQuotes = await Promise.all(
-          recent.map((c) => loadDailyQuotes(c.date, suffix === '.TWO' ? 'OTC' : 'TSE'))
-        );
+        // 三天通常落在同一個月，跨月時才會有兩份。一份月報表就涵蓋所有要校正的日期。
+        const months = [...new Set(recent.map((c) => c.date.slice(0, 7)))];
+        const official = new Map();
+        for (const monthMap of await Promise.all(
+          months.map((m) => loadOfficialMonth(code, suffix === '.TWO' ? 'OTC' : 'TSE', m))
+        )) {
+          for (const [date, row] of monthMap) official.set(date, row);
+        }
+
         let corrected = 0;
-        recent.forEach((candle, i) => {
-          const row = officialQuotes[i][code];
+        recent.forEach((candle) => {
+          const row = official.get(candle.date);
           if (!row) return;
           // Yahoo 的價格是浮點數，直接比對會把 12.489999771 與 12.49 當成不同，
           // 這個計數只是給人看的，用半個最小跳動單位當容差。

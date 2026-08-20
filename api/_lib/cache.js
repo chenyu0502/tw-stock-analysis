@@ -99,8 +99,8 @@ export async function withPartialCache(key, ttlMs, producer) {
   const hit = cacheGet(key);
   if (hit !== undefined) return hit;
 
-  // 這裡同樣需要合併併發請求。全市場行情與除權息表都走這個包裝器，
-  // 而且是最重的兩個上游，漏掉合併正是造成 /api/history 逾時的原因。
+  // 這裡同樣需要合併併發請求。官方月報表與除權息表都走這個包裝器，
+  // 一次開頁會同時查二十幾檔，漏掉合併正是造成 /api/history 逾時的原因之一。
   return dedupe(key, async () => {
     const { value, complete } = await producer();
     cacheSet(key, value, complete ? ttlMs : TTL.PARTIAL);
