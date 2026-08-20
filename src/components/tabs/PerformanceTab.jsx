@@ -274,9 +274,7 @@ export default function PerformanceTab() {
         </div>
 
         <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
-          持股若在某日之前就已買進且之後沒有異動，把起算日設為那天，
-          每日損益月曆、月走勢與歷年績效即可自該日完整回推——持股數固定，缺的只是每日收盤價。
-          留空則各持股用自己的建倉日。上方的「總損益」採成本法，不受起算日影響。
+          起算日設為那天，每日損益月曆、月走勢與歷年績效即可自該日完整回推。
         </p>
       </section>
 
