@@ -176,7 +176,7 @@ export default function RiskScan({ holdings }) {
       ) : (
         <>
           <ScanPanel
-            icon={<Activity size={14} className="shrink-0 text-slate-400" />}
+            icon={<Activity size={14} className="shrink-0 text-violet-400" />}
             title="融資融券籌碼"
             summary={
               withMargin === 0
@@ -198,7 +198,7 @@ export default function RiskScan({ holdings }) {
           </ScanPanel>
 
           <ScanPanel
-            icon={<Layers size={14} className="shrink-0 text-slate-400" />}
+            icon={<Layers size={14} className="shrink-0 text-sky-400" />}
             title="型態與攻守"
             summary={`${scoped.length} 檔的狀態分布`}
             note={
@@ -211,7 +211,7 @@ export default function RiskScan({ holdings }) {
           </ScanPanel>
 
           <ScanPanel
-            icon={<Scale size={14} className="shrink-0 text-slate-400" />}
+            icon={<Scale size={14} className="shrink-0 text-indigo-400" />}
             title="估值檢視"
             summary={
               withValuation === 0
@@ -234,7 +234,7 @@ export default function RiskScan({ holdings }) {
           </ScanPanel>
 
           <ScanPanel
-            icon={<ScanLine size={14} className="shrink-0 text-slate-400" />}
+            icon={<ScanLine size={14} className="shrink-0 text-cyan-400" />}
             title="其餘規則掃描"
             summary={
               split.others.length === 0
@@ -265,7 +265,7 @@ export default function RiskScan({ holdings }) {
                     .forEach((h) => dispatch(loadFundamentals({ code: h.code })))
                 }
                 disabled={loadingFundamentals}
-                className="mt-2 flex items-center gap-1.5 rounded border border-sky-700 bg-sky-600/20 px-2.5 py-1 text-[11px] text-sky-300 transition hover:bg-sky-600/30 disabled:opacity-40"
+                className="mt-2 flex items-center gap-1.5 rounded-lg bg-sky-600 px-2.5 py-1.5 text-[11px] font-medium text-white transition hover:bg-sky-500 disabled:opacity-40"
               >
                 {loadingFundamentals ? <RefreshCw size={12} className="animate-spin" /> : null}
                 {loadingFundamentals ? '載入中…' : `載入 ${pending} 檔的基本面`}

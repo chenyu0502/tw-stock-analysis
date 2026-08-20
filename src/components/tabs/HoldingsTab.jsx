@@ -155,7 +155,7 @@ export default function HoldingsTab() {
             onClick={handleCashFlow}
             className="flex items-center gap-1.5 rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-300 transition hover:border-slate-500"
           >
-            <Banknote size={14} /> 記錄資金進出
+            <Banknote size={14} className="text-cyan-400" /> 記錄資金進出
           </button>
         </div>
         <p className="mt-1.5 text-[11px] text-slate-600">

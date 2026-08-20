@@ -108,7 +108,7 @@ export default function ValuationOverview({ holdings }) {
               .forEach((h) => dispatch(loadFundamentals({ code: h.code })))
           }
           disabled={loading}
-          className="mt-2 flex items-center gap-1.5 rounded border border-sky-700 bg-sky-600/20 px-2.5 py-1 text-[11px] text-sky-300 transition hover:bg-sky-600/30 disabled:opacity-40"
+          className="mt-2 flex items-center gap-1.5 rounded-lg bg-sky-600 px-2.5 py-1.5 text-[11px] font-medium text-white transition hover:bg-sky-500 disabled:opacity-40"
         >
           {loading ? <RefreshCw size={12} className="animate-spin" /> : null}
           {loading ? '載入中…' : `載入 ${pending} 檔的估值資料`}

@@ -99,11 +99,11 @@ export default function AnalysisTab() {
             onClick={() => exportJson({ watchlist }, '感興趣標的.json')}
             className="flex items-center gap-1.5 rounded border border-slate-700 px-2.5 py-1.5 text-slate-300 transition hover:border-slate-500"
           >
-            <Download size={13} /> 匯出 JSON
+            <Download size={13} className="text-sky-400" /> 匯出 JSON
           </button>
 
           <label className="flex cursor-pointer items-center gap-1.5 rounded border border-slate-700 px-2.5 py-1.5 text-slate-300 transition hover:border-slate-500">
-            <Upload size={13} /> 匯入
+            <Upload size={13} className="text-violet-400" /> 匯入
             <input type="file" accept=".json,.xlsx,.xls,.csv" onChange={handleImport} className="hidden" />
           </label>
 
@@ -112,7 +112,7 @@ export default function AnalysisTab() {
             onClick={() => exportExcel(watchlistTemplate(), '感興趣標的匯入範例.xlsx', '標的清單')}
             className="flex items-center gap-1.5 rounded border border-slate-700 px-2.5 py-1.5 text-slate-300 transition hover:border-slate-500"
           >
-            <FileSpreadsheet size={13} /> 下載範例
+            <FileSpreadsheet size={13} className="text-indigo-400" /> 下載範例
           </button>
         </div>
       </div>

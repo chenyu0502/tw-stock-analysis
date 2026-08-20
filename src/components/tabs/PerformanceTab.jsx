@@ -243,7 +243,7 @@ export default function PerformanceTab() {
       <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <label className="flex items-center gap-2 text-xs text-slate-400">
-            <CalendarClock size={14} />
+            <CalendarClock size={14} className="text-sky-400" />
             統計起算日
             <input
               type="date"

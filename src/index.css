@@ -15,6 +15,17 @@ body,
 body {
   margin: 0;
   background-color: var(--color-slate-950);
+  /*
+   * 頂部一層很淡的藍光暈。純平塗的 slate-950 整頁看起來偏悶，
+   * 加一層漸層就有深度，但不能亮到干擾數字——數字才是主角。
+   * fixed 讓它不隨捲動跑掉，否則往下捲會突然變暗。
+   */
+  background-image: radial-gradient(
+    1100px 520px at 50% -8%,
+    oklch(0.32 0.06 264 / 0.55),
+    transparent 68%
+  );
+  background-attachment: fixed;
   color: var(--color-slate-100);
   font-family: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif;
   /* 行動裝置底部導覽列需要避開系統手勢區。 */

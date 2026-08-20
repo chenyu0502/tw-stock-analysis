@@ -42,7 +42,7 @@ export default function Header() {
           type="button"
           onClick={handleRefresh}
           disabled={allCodes.length === 0 || isRefreshing}
-          className="rounded-lg border border-slate-700 p-2 text-slate-300 transition hover:border-slate-500 hover:text-white disabled:opacity-40"
+          className="rounded-lg border border-slate-700 p-2 text-sky-400 transition hover:border-sky-600 hover:text-sky-300 disabled:opacity-40"
           title="重新整理報價"
         >
           <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
@@ -61,7 +61,7 @@ export default function Header() {
             {user.photoURL && (
               <img src={user.photoURL} alt="" className="size-5 rounded-full" referrerPolicy="no-referrer" />
             )}
-            <LogOut size={14} />
+            <LogOut size={14} className="text-slate-400" />
             登出
           </button>
         ) : (

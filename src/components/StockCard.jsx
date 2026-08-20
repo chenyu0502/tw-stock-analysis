@@ -201,7 +201,7 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
                   type="button"
                   onClick={handleOptimize}
                   disabled={optimizing || candles.length < 60}
-                  className="flex items-center gap-1.5 rounded border border-sky-700 bg-sky-600/20 px-2.5 py-1 text-sky-300 transition hover:bg-sky-600/30 disabled:opacity-40"
+                  className="flex items-center gap-1.5 rounded border border-violet-700 bg-violet-600/20 px-2.5 py-1 text-violet-300 transition hover:bg-violet-600/30 disabled:opacity-40"
                 >
                   <Wand2 size={13} />
                   {optimizing ? '回測中…' : '回測最佳化'}
