@@ -14,6 +14,7 @@ import { fetchJson, toNumber } from './http.js';
 import { withCache, withPartialCache, TTL } from './cache.js';
 import { analyzeHandler } from './analyze.js';
 import { fundamentalsHandler } from './fundamentals.js';
+import { marketIndexHandler } from './marketIndex.js';
 
 const TWSE_OPENAPI = 'https://openapi.twse.com.tw/v1';
 const TWSE_RWD = 'https://www.twse.com.tw/rwd/zh';
@@ -1017,4 +1018,5 @@ export const routes = {
   exdividend: exDividendHandler,
   universe: universeHandler,
   analyze: analyzeHandler,
+  marketindex: marketIndexHandler,
 };

@@ -46,6 +46,16 @@ export const loadExDividend = createAsyncThunk('market/loadExDividend', async ()
   api.fetchExDividend()
 );
 
+/**
+ * 載入加權指數與櫃買指數。
+ *
+ * 全市場共用，與持股清單無關，因此不帶參數。
+ */
+export const loadMarketIndices = createAsyncThunk(
+  'market/loadMarketIndices',
+  async ({ withCandles = true } = {}) => api.fetchMarketIndices({ withCandles })
+);
+
 /** 一次載入融資融券、三大法人、估值三項每日更新的資料。 */
 export const loadDailyStats = createAsyncThunk('market/loadDailyStats', async (codes) => {
   // 三個端點互不相依，並行取用。任一失敗不應拖垮其他兩項，因此用 allSettled。
@@ -76,7 +86,16 @@ const initialState = {
    * 同一檔在公告區間內可能有多筆（月配 ETF），只留最近的那一次。
    */
   exDividend: {},
-  loading: { quotes: false, history: false, daily: false, chips: false, fundamentals: false },
+  /** 大盤指數，鍵為 TAIEX / TPEX，值含即時報價與日 K。 */
+  indices: {},
+  loading: {
+    quotes: false,
+    history: false,
+    daily: false,
+    chips: false,
+    fundamentals: false,
+    indices: false,
+  },
   error: null,
   lastQuoteAt: null,
 };
@@ -114,6 +133,23 @@ const marketSlice = createSlice({
       .addCase(loadHistory.rejected, (state, action) => {
         state.loading.history = false;
         state.error = action.error.message;
+      })
+
+      .addCase(loadMarketIndices.pending, (state) => {
+        state.loading.indices = true;
+      })
+      .addCase(loadMarketIndices.fulfilled, (state, action) => {
+        state.loading.indices = false;
+        // 只更新報價的那幾次不會帶 K 線，要保留既有的，否則展開中的圖會清空。
+        const next = action.payload.indices ?? {};
+        for (const [id, value] of Object.entries(next)) {
+          const candles = value.candles?.length ? value.candles : (state.indices[id]?.candles ?? []);
+          state.indices[id] = { ...value, candles };
+        }
+      })
+      .addCase(loadMarketIndices.rejected, (state) => {
+        // 大盤只是參考資訊，取不到就不顯示，不蓋掉報價的錯誤訊息。
+        state.loading.indices = false;
       })
 
       .addCase(loadExDividend.fulfilled, (state, action) => {

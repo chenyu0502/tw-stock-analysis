@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Plus, Download, Upload, FileSpreadsheet } from 'lucide-react';
+import MarketIndices from '../MarketIndices.jsx';
 import { addWatch, removeWatch, updateWatch } from '../../store/portfolioSlice.js';
 import { loadQuotes, loadDailyStats } from '../../store/marketSlice.js';
 import { exportExcel, exportJson, importExcel, importJson, watchlistTemplate } from '../../lib/excel.js';
@@ -85,6 +86,9 @@ export default function AnalysisTab() {
 
   return (
     <div className="space-y-4">
+      {/* 大盤放最上面：看自選股之前先知道今天整體是什麼行情。 */}
+      <MarketIndices />
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-medium text-slate-300">
           感興趣標的

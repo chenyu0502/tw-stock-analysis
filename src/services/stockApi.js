@@ -104,6 +104,16 @@ export function fetchExDividend() {
 }
 
 /**
+ * 取得加權指數與櫃買指數的即時報價與日 K。
+ *
+ * 兩個指數一次取回，不分別請求——它們永遠一起顯示，拆成兩趟只是多一次往返。
+ */
+export function fetchMarketIndices({ withCandles = true } = {}) {
+  // 盤中每分鐘更新報價，但日 K 一天只會多一根，沒必要跟著重抓一年份。
+  return callApi('marketindex', withCandles ? {} : { candles: '0' });
+}
+
+/**
  * 取得全市場代號名稱對照表。資料量約 2000 筆，載入後應快取於記憶體。
  */
 export function fetchUniverse() {
