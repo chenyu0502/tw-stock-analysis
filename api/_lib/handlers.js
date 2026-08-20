@@ -11,7 +11,7 @@
  */
 
 import { fetchJson, toNumber } from './http.js';
-import { withCache, withPartialCache, TTL } from './cache.js';
+import { withCache, withPartialCache, cacheGet, TTL } from './cache.js';
 import { analyzeHandler } from './analyze.js';
 import { fundamentalsHandler } from './fundamentals.js';
 import { marketIndexHandler } from './marketIndex.js';
@@ -114,13 +114,21 @@ async function loadUniverse() {
 }
 
 /**
- * 查出個股屬於上市或上櫃。查不到時預設上市，由呼叫端自行處理後備。
+ * 查出個股屬於上市或上櫃，**只讀已經在快取裡的對照表，絕不觸發載入**。
+ *
+ * 歷史查詢只拿這個結果決定先試 .TW 還是 .TWO，猜錯的代價是多打一次 Yahoo，
+ * 實測 0.2 秒。而建一次對照表要抓兩份全市場清單，正式站實測 5.4 秒——
+ * 一次開頁二十幾檔各自冷啟動，每個實例都付這 5.4 秒，正是壓測時單檔
+ * 拖到 27 秒的主因。用 0.2 秒的可能損失換掉 5.4 秒的必然成本。
+ *
+ * 對照表由前端的代號搜尋等處自然填熱，溫的時候這裡照樣受益。
+ *
  * @param {string} code
- * @returns {Promise<'TSE'|'OTC'>}
+ * @returns {'TSE'|'OTC'|null} 尚未快取時回傳 null
  */
-async function resolveMarket(code) {
-  const universe = await loadUniverse();
-  return universe[code]?.market ?? 'TSE';
+function peekMarket(code) {
+  const universe = cacheGet('universe');
+  return universe?.[code]?.market ?? null;
 }
 
 /**
@@ -563,8 +571,10 @@ export async function historyHandler(query) {
 
   const cacheKey = `history:${code}:${range}:${interval}`;
   const body = await withCache(cacheKey, TTL.HISTORY, async () => {
-    const market = await resolveMarket(code);
-    // 依對照表結果決定優先順序，查不到時仍會嘗試另一種後綴。
+    // 只在對照表已經快取時用它決定順序，沒有就直接用預設順序——
+    // 為了排順序而去建一次對照表並不划算，理由見 peekMarket。
+    const market = peekMarket(code);
+    // 兩種後綴都會嘗試，順序猜錯只是多打一次 Yahoo。
     const suffixes = market === 'OTC' ? ['.TWO', '.TW'] : ['.TW', '.TWO'];
 
     let lastError;
