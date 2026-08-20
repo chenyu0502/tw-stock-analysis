@@ -47,7 +47,7 @@ export default function MarginTable({ holdings, marginMap, quotes }) {
   if (rows.length === 0) {
     return (
       <p className="py-4 text-center text-sm text-slate-500">
-        持股中沒有具融資融券資料的標的。ETF 與非信用交易個股本來就沒有這項資料，屬正常情形。
+        所選範圍中沒有具融資融券資料的標的。非信用交易標的本來就沒有這項資料，屬正常情形。
       </p>
     );
   }
@@ -114,7 +114,7 @@ export default function MarginTable({ holdings, marginMap, quotes }) {
         數字只描述資金流向，
         <span className="text-slate-500">不代表多空</span>
         ——融資增加有人讀成散戶追高、有人讀成資金流入，沒有共識。
-        {missing > 0 && `另有 ${missing} 檔無融資融券資料（ETF 或非信用交易個股），未列入表中。`}
+        {missing > 0 && `另有 ${missing} 檔無融資融券資料（非信用交易標的），未列入表中。`}
       </p>
     </div>
   );

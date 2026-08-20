@@ -341,8 +341,9 @@ export function describeExDividend(schedule, today = null) {
  * 沒有共識；把其中一種解讀寫死在介面上，等於替使用者做了判斷。
  * 這裡只講「增加多少張、增幅多少」，方向留給使用者。
  *
- * ETF 與非信用交易個股沒有這些資料，回傳空陣列而不是零——
+ * 非信用交易標的沒有這些資料，回傳空陣列而不是零——
  * 「沒有資料」與「沒有異常」是兩件事。
+ * （台股 ETF 可以信用交易，多數是有資料的，不要預設它們沒有。）
  *
  * @param {object|null} m /api/margin 的單檔資料
  * @returns {object[]}
