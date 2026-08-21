@@ -132,12 +132,9 @@ export default function PerformanceTab() {
   const yearly = useMemo(() => aggregateByYear(curve), [curve]);
   const realized = useMemo(() => realizedSummary(transactions), [transactions]);
   const monthly = useMemo(() => curveMonthly.slice(-MONTHS_SHOWN), [curveMonthly]);
-  // 帶入交易紀錄與今日日期，當日損益才能把今天成交的部位按成交價計算，
-  // 而不是把整日漲跌套用在成交後的股數上。
-  const today = useMemo(
-    () => todayPnl(holdings, quotes, transactions, todayDate()),
-    [holdings, quotes, transactions]
-  );
+  // 當日損益一律「庫存股數 × 當日漲跌」，不對今日成交做特別處理、也不扣手續費。
+  // 理由見 todayPnl：交易紀錄的日期是登錄日而非成交日，特別處理反而會算錯。
+  const today = useMemo(() => todayPnl(holdings, quotes), [holdings, quotes]);
 
   // 成本法的部位彙總，與持股頁共用同一個函式，兩頁數字保證一致。
   const position = useMemo(() => positionSummary(holdings, quotes, cash), [holdings, quotes, cash]);
@@ -317,7 +314,7 @@ export default function PerformanceTab() {
       {/* 今日逐檔明細 */}
       <Panel
         title="今日各檔損益"
-        note="盤中為即時試算，可與券商對照。今日成交的部位以成交價計算價差，不套用整日漲跌"
+        note="損益為「庫存股數 × 當日漲跌」，不扣手續費。盤中為即時試算，可與券商對照；股數或成本有出入時，在持股頁直接編輯校正"
       >
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -337,11 +334,6 @@ export default function PerformanceTab() {
                   <td className="py-1.5">
                     <span className="text-slate-300">{item.code}</span>
                     {item.name && <span className="ml-1.5 text-slate-500">{item.name}</span>}
-                    {item.tradedShares !== 0 && (
-                      <span className="ml-1.5 rounded bg-sky-950/60 px-1 py-0.5 text-[10px] text-sky-400">
-                        今日成交 {int(item.tradedShares)}
-                      </span>
-                    )}
                   </td>
                   <td className="py-1.5 text-right text-slate-300">{num(item.price)}</td>
                   <td className="py-1.5 text-right text-slate-400">{int(item.shares)}</td>
