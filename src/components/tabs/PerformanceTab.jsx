@@ -11,7 +11,7 @@ import {
   CartesianGrid,
 } from 'recharts';
 import { CalendarClock } from 'lucide-react';
-import { loadHistory, loadQuotes } from '../../store/marketSlice.js';
+import { loadHistory, loadQuotes, isHistoryStale } from '../../store/marketSlice.js';
 import {
   today as todayDate,
   setStatsStartDate,
@@ -65,15 +65,19 @@ export default function PerformanceTab() {
     return [...codes].join(',');
   }, [holdings, transactions]);
 
+  // 換日後要重抓日 K。應用程式開著跨過換日時，舊資料會讓月曆少掉今天那格，
+  // 昨天那格也會停在昨天盤中的價格。把日期放進相依，切回這一頁就會補抓。
+  const day = todayDate();
+
   useEffect(() => {
     if (!codesKey) return;
     if (quoteCodesKey) dispatch(loadQuotes(quoteCodesKey.split(',')));
     codesKey.split(',').forEach((code) => {
-      if (!history[code]) dispatch(loadHistory({ code, range: '2y' }));
+      if (isHistoryStale(history[code])) dispatch(loadHistory({ code, range: '2y' }));
     });
     // history 刻意不列入相依，否則每次寫入快取都會重新觸發整批載入。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [codesKey, quoteCodesKey, dispatch]);
+  }, [codesKey, quoteCodesKey, day, dispatch]);
 
   const allTransactions = useMemo(
     () => normalizeTransactions(holdings, transactions, statsStartDate),

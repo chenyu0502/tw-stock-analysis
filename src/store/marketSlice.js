@@ -6,17 +6,49 @@
 
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import * as api from '../services/stockApi.js';
+import { today } from './portfolioSlice.js';
+
+/**
+ * 這份日 K 是否該重抓。
+ *
+ * **日 K 原本只在「尚未載入」時抓，一整個分頁生命週期都不會更新。**
+ * 應用程式開著跨過換日就會出事，而且症狀不像資料過期：
+ *
+ * 1. 曲線最後一天停在昨天，於是月曆**今天那格根本不存在**。
+ * 2. 昨天那根 K 棒是昨天盤中抓的，收盤價其實是當時的盤中價，
+ *    不是官方收盤價，於是**昨天那格的數字是錯的**。
+ *
+ * 同一時間「今日損益」用的是會自己更新的即時報價，兩邊因此對不起來。
+ *
+ * @param {{loadedOn?: string}|undefined} entry
+ * @returns {boolean}
+ */
+export function isHistoryStale(entry) {
+  return !entry || entry.loadedOn !== today();
+}
 
 /** 載入多檔即時報價。 */
 export const loadQuotes = createAsyncThunk('market/loadQuotes', async (codes) =>
   api.fetchQuotes(codes)
 );
 
-/** 載入單檔歷史 K 線。 */
-export const loadHistory = createAsyncThunk('market/loadHistory', async ({ code, range }) => {
-  const data = await api.fetchHistory(code, { range });
-  return { code, data };
-});
+/**
+ * 載入單檔歷史 K 線。
+ *
+ * `condition` 擋掉同一檔正在進行中的重複請求。守衛條件是「資料還沒進 store」，
+ * 而在第一個回應回來之前那個條件對每個元件都成立——實測十檔會送出四十四次請求，
+ * 全部擠在 0.35 秒內。這正是先前把 /api/history 打到 504 的那種併發形狀。
+ */
+export const loadHistory = createAsyncThunk(
+  'market/loadHistory',
+  async ({ code, range }) => {
+    const data = await api.fetchHistory(code, { range });
+    return { code, data };
+  },
+  {
+    condition: ({ code }, { getState }) => !getState().market.historyPending[code],
+  }
+);
 
 /** 載入單檔的三大法人買賣超歷史序列。 */
 export const loadInstitutionalHistory = createAsyncThunk(
@@ -88,6 +120,8 @@ const initialState = {
   exDividend: {},
   /** 大盤指數，鍵為 TAIEX / TPEX，值含即時報價與日 K。 */
   indices: {},
+  /** 正在請求中的日 K 代號，用於擋掉重複請求。 */
+  historyPending: {},
   loading: {
     quotes: false,
     history: false,
@@ -123,15 +157,20 @@ const marketSlice = createSlice({
         state.error = action.error.message;
       })
 
-      .addCase(loadHistory.pending, (state) => {
+      .addCase(loadHistory.pending, (state, action) => {
         state.loading.history = true;
+        state.historyPending[action.meta.arg.code] = true;
       })
       .addCase(loadHistory.fulfilled, (state, action) => {
         state.loading.history = false;
-        state.history[action.payload.code] = action.payload.data;
+        delete state.historyPending[action.payload.code];
+        // 記下抓取當天的日期，換日後才知道這份要重抓。見 isHistoryStale。
+        state.history[action.payload.code] = { ...action.payload.data, loadedOn: today() };
       })
       .addCase(loadHistory.rejected, (state, action) => {
         state.loading.history = false;
+        // 失敗也要清掉，否則這一檔在整個分頁生命週期內都不會再重試。
+        delete state.historyPending[action.meta.arg.code];
         state.error = action.error.message;
       })
 

@@ -8,6 +8,7 @@ import {
   loadInstitutionalHistory,
   loadFundamentals,
   loadExDividend,
+  isHistoryStale,
 } from '../../store/marketSlice.js';
 import { buildAnalysisInput } from '../../lib/analysisInput.js';
 import { detectRisks } from '../../lib/risks.js';
@@ -89,7 +90,7 @@ export default function AiTab() {
   // 中線判斷需要籌碼面，長線判斷需要估值，缺一模型就無法完成三個週期的判讀。
   useEffect(() => {
     if (!code) return;
-    if (!history[code]) dispatch(loadHistory({ code, range: '1y' }));
+    if (isHistoryStale(history[code])) dispatch(loadHistory({ code, range: '1y' }));
     if (!chipHistoryMap[code]) dispatch(loadInstitutionalHistory({ code, days: 30 }));
     // 基本面一檔要打五個 FinMind 資料集，伺服器快取一天，前端也只在未載入時取用。
     if (!fundamentalsMap[code]) dispatch(loadFundamentals({ code }));

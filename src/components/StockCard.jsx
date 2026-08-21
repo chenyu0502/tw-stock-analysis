@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { ChevronDown, ChevronUp, Trash2, Wand2 } from 'lucide-react';
-import { loadHistory, loadInstitutionalHistory } from '../store/marketSlice.js';
+import { loadHistory, loadInstitutionalHistory, isHistoryStale } from '../store/marketSlice.js';
+import { today } from '../store/portfolioSlice.js';
 import { crossState, kd, macd, rsi, bias, atr, optimizeMaPeriods } from '../lib/indicators.js';
 import { num, pct, int, changeColor, stateColor } from '../lib/format.js';
 import { maStances, STANCE_LABEL, compareStanceStrategies } from '../lib/stance.js';
@@ -43,9 +44,12 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
   //
   // 法人歷史則維持延後載入：那個走 FinMind，免費方案每小時 600 次，
   // 一次替所有卡片抓會很快把額度用掉，而它只有展開時才顯示。
+  // 日期放進相依，換日後重新繪製這張卡片時才會補抓，不會一直用昨天的 K 線。
+  const day = today();
+
   useEffect(() => {
-    if (!history) dispatch(loadHistory({ code: item.code, range: '1y' }));
-  }, [history, item.code, dispatch]);
+    if (isHistoryStale(history)) dispatch(loadHistory({ code: item.code, range: '1y' }));
+  }, [history, item.code, day, dispatch]);
 
   useEffect(() => {
     if (!expanded) return;
