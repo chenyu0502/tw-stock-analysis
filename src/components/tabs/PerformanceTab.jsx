@@ -107,7 +107,16 @@ export default function PerformanceTab() {
     () => reconcileShares(allTransactions, holdings),
     [allTransactions, holdings]
   );
-  const mismatchCodes = Object.keys(shareMismatch);
+  // 只有「進出紀錄比持股清單多」才是真的有問題。
+  //
+  // reconcileShares 的差額 = 持股清單 − 進出紀錄累計：
+  //
+  // - **差額為正**（紀錄少於持股）是**正常情形**，不該警告。開始記錄交易之前就持有的
+  //   部位本來就沒有紀錄，曲線會把差額當成期初部位，算出來的損益完全正確。
+  //   買零股時尤其明顯：手上四千多股、紀錄只有剛買的九十五股，那不是資料壞掉。
+  // - **差額為負**（紀錄多於持股）才有問題：期初部位會變成負數，等於曲線從一個
+  //   不存在的空單開始。重複匯入交易紀錄就是這個形狀，每日損益會整段放大。
+  const mismatchCodes = Object.keys(shareMismatch).filter((code) => shareMismatch[code] < 0);
 
   // 完全沒有歷史股價的持股。
   //
@@ -183,7 +192,8 @@ export default function PerformanceTab() {
       {mismatchCodes.length > 0 && (
         <div className="rounded-lg border border-amber-800/60 bg-amber-950/30 p-3 text-xs text-amber-300">
           <div className="leading-relaxed">
-            以下 {mismatchCodes.length} 檔的「進出紀錄」與持股清單對不起來。
+            以下 {mismatchCodes.length} 檔的「進出紀錄」累計股數<span className="text-amber-200">多於</span>
+            持股清單。
             <span className="text-amber-200">下方所有數字已改以持股清單為準，是正確的。</span>
           </div>
           <ul className="tabular mt-2 space-y-0.5">
@@ -198,8 +208,11 @@ export default function PerformanceTab() {
             {mismatchCodes.length > 12 && <li>…另有 {mismatchCodes.length - 12} 檔</li>}
           </ul>
           <p className="mt-2 leading-relaxed text-amber-400/90">
-            「進出紀錄」是每次在持股頁新增持股時自動留下的，介面上沒有列出的地方。
-            之後直接修改股數並不會更新它，重複輸入過同一檔也會多留一筆，兩邊就此分家。
+            最常見的成因是同一檔重複輸入或重複匯入，多留了幾筆買進。
+            這會讓權益曲線的期初部位變成負數，等於從一個不存在的空單開始起算。
+            <br />
+            若這幾檔確實有過買賣，先用「匯出 JSON」備份再處理；
+            只是重複輸入造成的，直接清除最乾淨。
           </p>
           {/* 沒有實際買賣時，清掉這些紀錄是最乾淨的收尾：
               該檔會改用「以統計起算日建倉」的補記方式，股數與成本直接取自持股清單。 */}
