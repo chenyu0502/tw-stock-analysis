@@ -250,8 +250,20 @@ export default function HoldingsTab() {
               onUpdate={(code, patch) => dispatch(updateHolding({ code, patch }))}
               extra={
                 <div className="tabular grid grid-cols-4 gap-2 border-t border-slate-800/70 px-3 py-2 text-xs">
-                  <Cell label="股數" value={int(row.shares)} />
-                  <Cell label="成本均價" value={num(row.avgCost)} />
+                  <EditableCell
+                    label="股數"
+                    value={row.shares}
+                    format={int}
+                    integer
+                    onCommit={(shares) => dispatch(updateHolding({ code: row.code, patch: { shares } }))}
+                  />
+                  <EditableCell
+                    label="成本均價"
+                    value={row.avgCost}
+                    format={formatCost}
+                    step="0.0001"
+                    onCommit={(avgCost) => dispatch(updateHolding({ code: row.code, patch: { avgCost } }))}
+                  />
                   <Cell label="市值" value={money(row.value)} />
                   <Cell
                     label="損益"
@@ -263,6 +275,13 @@ export default function HoldingsTab() {
               }
             />
           ))}
+
+          <p className="px-1 text-[11px] leading-relaxed text-slate-600">
+            股數與成本均價可直接點擊修改，用來對齊券商對帳單——零股的手續費有最低收費，
+            攤進去之後的成本均價不會是程式算得出來的數字。
+            這種修改不會產生交易紀錄，因此與「記錄交易」不同：它只改現況，不改歷史。
+            權益曲線一律以持股清單的股數為準，兩邊不一致時績效頁會提示。
+          </p>
         </div>
       )}
     </div>
@@ -285,6 +304,96 @@ function SummaryCard({ label, value, sub, tone }) {
           {sub}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * 成本均價的顯示格式。
+ *
+ * 平常兩位小數就夠，但零股買賣攤進手續費之後常常除不盡（例如 36.1834）。
+ * 一律顯示兩位會讓使用者剛存好的數字看起來被改掉，因此**有多的位數才顯示多的**，
+ * 最多四位——與記錄交易那裡的含費用單位成本試算同一個精度。
+ * @param {number|null|undefined} value
+ * @returns {string}
+ */
+function formatCost(value) {
+  if (!Number.isFinite(value)) return num(value);
+  return Math.abs(value * 100 - Math.round(value * 100)) < 1e-9 ? num(value, 2) : num(value, 4);
+}
+
+/**
+ * 可就地編輯的欄位。
+ *
+ * 存在的理由是零股：券商收的手續費有最低收費，攤進去之後的成本均價
+ * 不是程式算得出來的漂亮數字，得照對帳單填。股數同理，配息再投資或
+ * 盤後零股成交都可能讓數字對不上。
+ *
+ * 點一下數字才進入編輯，不做成永遠是輸入框——手機上捲動時很容易誤觸。
+ * Enter 或離開焦點即存檔，Esc 取消。
+ *
+ * @param {{
+ *   label: string,
+ *   value: number,
+ *   format: (v:number)=>string,
+ *   onCommit: (v:number)=>void,
+ *   integer?: boolean,
+ *   step?: string
+ * }} props
+ */
+function EditableCell({ label, value, format, onCommit, integer = false, step = '1' }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  function start() {
+    setDraft(Number.isFinite(value) ? String(value) : '');
+    setEditing(true);
+  }
+
+  function commit() {
+    setEditing(false);
+    const next = Number(draft);
+    // 空白、非數字或負數一律視為取消，不要把持股數變成 NaN——
+    // 那會讓整條權益曲線變成 NaN，而且畫面上看不出原因。
+    if (draft.trim() === '' || !Number.isFinite(next) || next < 0) return;
+    const rounded = integer ? Math.round(next) : next;
+    if (rounded === value) return;
+    onCommit(rounded);
+  }
+
+  if (!editing) {
+    return (
+      <div>
+        <div className="text-[10px] text-slate-500">{label}</div>
+        <button
+          type="button"
+          onClick={start}
+          title={`點擊編輯${label}`}
+          className="w-full text-left text-slate-200 underline decoration-slate-700 decoration-dotted underline-offset-4 transition hover:decoration-sky-500"
+        >
+          {format(value)}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="text-[10px] text-slate-500">{label}</div>
+      <input
+        type="number"
+        min="0"
+        step={step}
+        value={draft}
+        autoFocus
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit();
+          if (e.key === 'Escape') setEditing(false);
+        }}
+        className="tabular w-full rounded border border-sky-600 bg-slate-800 px-1 py-0.5 text-slate-100 focus:outline-none"
+      />
     </div>
   );
 }
