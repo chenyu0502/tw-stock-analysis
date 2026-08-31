@@ -93,7 +93,19 @@ export function mergePortfolio(local, cloud) {
     return [...map.values()];
   };
 
-  const byAddedAt = (item, prev) => (item.addedAt ?? 0) > (prev.addedAt ?? 0);
+  /**
+   * 持股與追蹤標的的新舊比較。
+   *
+   * **不能只看 addedAt。** 那是「第一次建立」的時間，修改股數、成本或均線參數
+   * 都不會更動它。兩台裝置各自持有同一檔、addedAt 相同時，比較結果永遠是平手，
+   * 於是各自保留自己的版本並在下次同步時覆蓋雲端——兩邊永遠對不起來。
+   * 實際症狀：手機顯示 4,498 股、網頁顯示 4,593 股，怎麼重開都不會一致。
+   *
+   * 改看 updatedAt（每次修改都會更新），沒有的舊資料退回 addedAt，
+   * 因此不需要資料移轉：只要有一邊改過，那一邊就會贏。
+   */
+  const stamp = (item) => Math.max(Number(item.updatedAt) || 0, Number(item.addedAt) || 0);
+  const byAddedAt = (item, prev) => stamp(item) > stamp(prev);
   // 逐筆事件沒有 addedAt，同 id 視為同一筆，保留先取到的即可。
   const keepFirst = () => false;
   const byDate = (x, y) => String(x.date).localeCompare(String(y.date));

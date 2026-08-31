@@ -356,9 +356,12 @@ function EditableCell({ label, value, format, onCommit, integer = false, step = 
     // 空白、非數字或負數一律視為取消，不要把持股數變成 NaN——
     // 那會讓整條權益曲線變成 NaN，而且畫面上看不出原因。
     if (draft.trim() === '' || !Number.isFinite(next) || next < 0) return;
-    const rounded = integer ? Math.round(next) : next;
-    if (rounded === value) return;
-    onCommit(rounded);
+    // 數值沒變也照樣送出。
+    //
+    // 送出會更新 updatedAt，而那是跨裝置合併判斷新舊的依據。
+    // 兩台裝置的同一檔若都只有 addedAt，比較結果永遠平手、各自保留自己的版本，
+    // 這時「點開再按 Enter」就是把正確的那一台標記成較新的最簡單做法。
+    onCommit(integer ? Math.round(next) : next);
   }
 
   if (!editing) {

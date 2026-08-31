@@ -146,7 +146,7 @@ const portfolioSlice = createSlice({
     updateWatch(state, action) {
       const { code, patch } = action.payload;
       const item = state.watchlist.find((w) => w.code === code);
-      if (item) Object.assign(item, patch);
+      if (item) Object.assign(item, patch, { updatedAt: Date.now() });
     },
 
     /**
@@ -220,6 +220,8 @@ const portfolioSlice = createSlice({
           (existing.avgCost * existing.shares + price * shares + fee) / totalShares;
       }
       existing.shares = totalShares;
+      // 股數變了就要更新時間戳，否則另一台裝置會把它當成沒有變過的舊資料。
+      existing.updatedAt = Date.now();
     },
 
     removeTransaction(state, action) {
@@ -262,7 +264,9 @@ const portfolioSlice = createSlice({
     updateHolding(state, action) {
       const { code, patch } = action.payload;
       const item = state.holdings.find((h) => h.code === code);
-      if (item) Object.assign(item, patch);
+      // updatedAt 是跨裝置合併的依據。少了它，另一台裝置無從得知這份比較新，
+      // 兩邊會各自保留自己的版本並互相覆蓋雲端，永遠同步不了。
+      if (item) Object.assign(item, patch, { updatedAt: Date.now() });
     },
 
     /** 記錄一筆入金或出金。amount 正為入金、負為出金。 */
