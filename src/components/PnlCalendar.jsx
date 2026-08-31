@@ -39,10 +39,22 @@ export default function PnlCalendar({ curve }) {
     // 補上月末空格，湊滿整週。
     while (list.length % 7 !== 0) list.push(null);
 
+    // 每週除了合計金額，也留下涵蓋的日期範圍與交易日數，供停留時顯示。
+    // 只有一個百分比或一個數字時，看不出這一格代表哪幾天——月初與月末那兩格
+    // 常常只涵蓋兩三天，卻與整週的格子長得一樣。
     const weeks = [];
     for (let i = 0; i < list.length; i += 7) {
       const week = list.slice(i, i + 7).filter((c) => c?.pnl !== null && c?.pnl !== undefined);
-      weeks.push(week.length === 0 ? null : week.reduce((acc, c) => acc + c.pnl, 0));
+      if (week.length === 0) {
+        weeks.push(null);
+        continue;
+      }
+      weeks.push({
+        total: week.reduce((acc, c) => acc + c.pnl, 0),
+        from: week[0].date,
+        to: week[week.length - 1].date,
+        days: week.length,
+      });
     }
 
     return {
@@ -122,18 +134,24 @@ export default function PnlCalendar({ curve }) {
         {/* 週損益欄，與月曆各列對齊 */}
         <div className="grid w-14 grid-rows-[auto] gap-1">
           <div className="pb-1 text-center text-[10px] text-slate-600">週</div>
-          {weekTotals.map((total, i) => (
+          {weekTotals.map((week, i) => (
             <div
               key={`week-${i}`}
+              // 與日期格一致：格子只顯示到千位，對帳時需要完整金額，滑鼠停留即可看到。
+              title={
+                week
+                  ? `${week.from} ～ ${week.to}　${money(week.total)}（${week.days} 個交易日）`
+                  : undefined
+              }
               className={`tabular flex items-center justify-center rounded border border-slate-800/60 text-[10px] ${changeColor(
-                total
+                week?.total ?? null
               )}`}
             >
-              {total === null
+              {week === null
                 ? ''
-                : Math.abs(total) >= 1000
-                  ? `${total > 0 ? '+' : '-'}${Math.round(Math.abs(total) / 1000)}k`
-                  : Math.round(total)}
+                : Math.abs(week.total) >= 1000
+                  ? `${week.total > 0 ? '+' : '-'}${Math.round(Math.abs(week.total) / 1000)}k`
+                  : Math.round(week.total)}
             </div>
           ))}
         </div>
