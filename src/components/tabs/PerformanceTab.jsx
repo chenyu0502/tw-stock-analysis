@@ -263,35 +263,6 @@ export default function PerformanceTab() {
         />
       </div>
 
-      {/* 統計區間 */}
-      <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <label className="flex items-center gap-2 text-xs text-slate-400">
-            <CalendarClock size={14} className="text-sky-400" />
-            統計起算日
-            <input
-              type="date"
-              value={statsStartDate ?? ''}
-              onChange={(e) => dispatch(setStatsStartDate(e.target.value))}
-              className="tabular rounded border border-slate-700 bg-slate-800 px-2 py-1 text-slate-100"
-            />
-          </label>
-          {statsStartDate && (
-            <button
-              type="button"
-              onClick={() => dispatch(setStatsStartDate(null))}
-              className="text-xs text-slate-500 underline hover:text-slate-300"
-            >
-              清除
-            </button>
-          )}
-        </div>
-
-        <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
-          起算日設為那天，每日損益月曆、月走勢與歷年績效即可自該日完整回推。
-        </p>
-      </section>
-
       {monthPartial && (
         <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-xs text-slate-400">
           {statsStartDate ? (
@@ -304,7 +275,7 @@ export default function PerformanceTab() {
             <>
               損益走勢的統計區間自 <span className="tabular">{curveStart}</span> 起算，
               那是最早一筆交易紀錄或持股建倉日。此日之前的損益不在下方的月曆、月走勢與歷年績效中。
-              若持股在更早之前就已買進且之後沒有異動，把上方的統計起算日設到那天即可回推。
+              若持股在更早之前就已買進且之後沒有異動，把頁面最下方的統計起算日設到那天即可回推。
               上方的「總損益」採成本法，不受此限制。
             </>
           )}
@@ -513,6 +484,37 @@ export default function PerformanceTab() {
           </>
         )}
       </Panel>
+
+      {/* 統計區間。
+          放在最下方是刻意的：設定一次之後幾乎不會再動，擺在頁首只會把
+          每天都要看的損益數字往下推。 */}
+      <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <label className="flex items-center gap-2 text-xs text-slate-400">
+            <CalendarClock size={14} className="text-sky-400" />
+            統計起算日
+            <input
+              type="date"
+              value={statsStartDate ?? ''}
+              onChange={(e) => dispatch(setStatsStartDate(e.target.value))}
+              className="tabular rounded border border-slate-700 bg-slate-800 px-2 py-1 text-slate-100"
+            />
+          </label>
+          {statsStartDate && (
+            <button
+              type="button"
+              onClick={() => dispatch(setStatsStartDate(null))}
+              className="text-xs text-slate-500 underline hover:text-slate-300"
+            >
+              清除
+            </button>
+          )}
+        </div>
+
+        <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+          起算日設為那天，每日損益月曆、月走勢與歷年績效即可自該日完整回推。
+        </p>
+      </section>
     </div>
   );
 }
