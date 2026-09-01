@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Plus, AlertTriangle, Banknote } from 'lucide-react';
+import { Plus, AlertTriangle, Banknote, Download } from 'lucide-react';
 import {
   recordTrade,
   removeHolding,
@@ -11,6 +11,7 @@ import {
 } from '../../store/portfolioSlice.js';
 import { loadQuotes, loadDailyStats, loadExDividend } from '../../store/marketSlice.js';
 import { tradeCost } from '../../lib/fees.js';
+import { exportJson } from '../../lib/excel.js';
 import { positionSummary } from '../../lib/performance.js';
 import { money, pct, num, int, changeColor } from '../../lib/format.js';
 import StockCard from '../StockCard.jsx';
@@ -25,7 +26,10 @@ const CONCENTRATION_THRESHOLD = 30;
  */
 export default function HoldingsTab() {
   const dispatch = useDispatch();
-  const { holdings, cash } = useSelector((s) => s.portfolio);
+  // transactions 與 cashFlows 只用於匯出：備份與對帳需要進出紀錄，光有持股不夠。
+  const { holdings, cash, transactions, cashFlows, statsStartDate } = useSelector(
+    (s) => s.portfolio
+  );
   const quotes = useSelector((s) => s.market.quotes);
   const exDividend = useSelector((s) => s.market.exDividend);
 
@@ -235,6 +239,40 @@ export default function HoldingsTab() {
       </form>
 
       {message && <p className="text-xs text-amber-500">{message}</p>}
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-medium text-slate-300">
+          目前持股
+          <span className="tabular ml-2 rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-400">
+            {rows.length}
+          </span>
+        </h2>
+
+        {rows.length > 0 && (
+          <button
+            type="button"
+            // 匯出的是完整的持股與交易資料，不只畫面上看得到的欄位：
+            // 拿來備份、換裝置、或與人核對數字時都需要成本與進出紀錄。
+            onClick={() =>
+              exportJson(
+                {
+                  exportedAt: new Date().toISOString(),
+                  holdings,
+                  transactions,
+                  cashFlows,
+                  cash,
+                  // 起算日決定權益曲線從哪天開始算，對帳時少了它會對不出來。
+                  statsStartDate,
+                },
+                `持股_${today()}.json`
+              )
+            }
+            className="flex items-center gap-1.5 rounded border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 transition hover:border-slate-500"
+          >
+            <Download size={13} className="text-sky-400" /> 匯出 JSON
+          </button>
+        )}
+      </div>
 
       {rows.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-800 py-12 text-center text-sm text-slate-500">

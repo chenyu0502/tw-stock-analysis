@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Plus, Download, Upload, FileSpreadsheet } from 'lucide-react';
+import { Plus, Upload, FileSpreadsheet } from 'lucide-react';
 import MarketIndices from '../MarketIndices.jsx';
 import { addWatch, removeWatch, updateWatch } from '../../store/portfolioSlice.js';
 import { loadQuotes, loadDailyStats } from '../../store/marketSlice.js';
-import { exportExcel, exportJson, importExcel, importJson, watchlistTemplate } from '../../lib/excel.js';
+import { exportExcel, importExcel, importJson, watchlistTemplate } from '../../lib/excel.js';
 import StockCard from '../StockCard.jsx';
 
 /** 報價自動更新間隔。台股盤中每 30 秒更新一次已足夠，過於頻繁只是浪費上游額度。 */
@@ -97,15 +97,9 @@ export default function AnalysisTab() {
           </span>
         </h2>
 
+        {/* 感興趣標的沒有匯出，只有匯入。這份清單隨時在變、也沒有需要備份的數字，
+            要備份的是持股，那個放在持股頁。 */}
         <div className="flex flex-wrap gap-2 text-xs">
-          <button
-            type="button"
-            onClick={() => exportJson({ watchlist }, '感興趣標的.json')}
-            className="flex items-center gap-1.5 rounded border border-slate-700 px-2.5 py-1.5 text-slate-300 transition hover:border-slate-500"
-          >
-            <Download size={13} className="text-sky-400" /> 匯出 JSON
-          </button>
-
           <label className="flex cursor-pointer items-center gap-1.5 rounded border border-slate-700 px-2.5 py-1.5 text-slate-300 transition hover:border-slate-500">
             <Upload size={13} className="text-violet-400" /> 匯入
             <input type="file" accept=".json,.xlsx,.xls,.csv" onChange={handleImport} className="hidden" />
