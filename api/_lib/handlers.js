@@ -204,6 +204,8 @@ export async function quoteHandler(query) {
       };
     }
 
+    await applyOfficialClose(quotes);
+
     return {
       quotes,
       missing: codes.filter((c) => !quotes[c]),
@@ -212,6 +214,46 @@ export async function quoteHandler(query) {
   });
 
   return { status: 200, body };
+}
+
+/**
+ * 收盤後把「現價」換成官方收盤價。
+ *
+ * MIS 的 z 是最後一筆成交價，收盤後不會再改。台股的收盤價由 13:25～13:30 的
+ * 收盤集合競價決定，兩者通常相同，但不保證——實測 2026-09-01 的 00944，
+ * MIS 停在 21.26，證交所公告的收盤價是 21.25。持有一萬股就差一百元，
+ * 而且那個數字會被拿去跟券商對帳。
+ *
+ * **只在收盤後才動作，盤中完全不額外請求。** 盤中的即時價本來就該用 MIS，
+ * 而官方行情要收盤後才公布。判斷依據是 MIS 自己回報的成交時間。
+ *
+ * @param {Record<string, object>} quotes 會就地修改
+ */
+async function applyOfficialClose(quotes) {
+  const todayCompact = isoToCompact(taipeiToday());
+  const entries = Object.entries(quotes).filter(
+    ([, q]) => q.tradeDate === todayCompact && String(q.tradeTime ?? '') >= '13:30'
+  );
+  if (entries.length === 0) return;
+
+  const month = taipeiToday().slice(0, 7);
+  await Promise.all(
+    entries.map(async ([code, q]) => {
+      try {
+        const map = await loadOfficialMonth(code, q.market === 'OTC' ? 'OTC' : 'TSE', month);
+        const row = map.get(taipeiToday());
+        if (!row || !Number.isFinite(row.close) || row.close <= 0) return;
+        q.price = row.close;
+        q.open = row.open ?? q.open;
+        q.high = row.high ?? q.high;
+        q.low = row.low ?? q.low;
+        q.change = q.prevClose === null ? null : row.close - q.prevClose;
+        q.changePercent = q.change !== null && q.prevClose ? (q.change / q.prevClose) * 100 : null;
+      } catch {
+        // 取不到就沿用 MIS 的價格，不讓報價整批失敗。
+      }
+    })
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -637,7 +679,10 @@ export async function historyHandler(query) {
         }
 
         let corrected = 0;
-        const recent = raw.filter((c) => c.date < todayIso && official.has(c.date));
+        // 今天也校正，但只在官方已經公布時（收盤後）。盤中月報表裡沒有今天那列，
+        // official.has 自然為 false，因此不需要另外判斷是否收盤。
+        void todayIso;
+        const recent = raw.filter((c) => official.has(c.date));
         recent.forEach((candle) => {
           const row = official.get(candle.date);
           if (!row) return;
