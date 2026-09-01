@@ -512,14 +512,27 @@ async function loadOfficialMonth(code, market, month) {
 }
 
 /**
- * 以官方行情校正的交易日數。
+ * 以官方行情校正的月份數（含當月）。
  *
- * 只涵蓋最近幾天：對帳看的就是這幾天。更早的資料 Yahoo 通常已經補正確。
+ * **原本只校正最近三個交易日，那樣不夠。**
  *
- * 改用單檔單月端點後，這個數字不再乘上請求數——三天與三十天都是同一份月報表，
- * 頂多在跨月時多打一次。
+ * Yahoo 對部分標的回傳的是「還原股價」——除息日之前的每一根都被往下調整過。
+ * 實測 1453：2026-08-28 除息 0.35 元，8/03～8/27 每一天都比證交所低約 0.33，
+ * 比值固定 0.9709；而 8/28 起又變回未還原。`close` 與 `adjclose` 兩個欄位
+ * 給的是同一組數字，因此無法改讀另一個欄位繞過。
+ *
+ * 這對本專案是實質錯誤：權益曲線另外在除息日把配息當現金加回，
+ * 若價格序列也已經還原過，等於同一筆配息算了兩次；而且還原與未還原的交界
+ * 會生出一段假漲幅——實測 1453 在 8/28 那天憑空多出約 2,572 元。
+ *
+ * 單檔月報表只有兩三 KB，一次涵蓋整個月，因此改成校正最近幾個月的每一天。
+ *
+ * **取三個月而不是兩個月，是為了避開交界的假跳空。** 校正區間的第一天會拿
+ * 未校正的前一天當基準，那個落差會整包變成當天的損益：實測只校正兩個月時，
+ * 8/03 相對 7/31 憑空多出 2,451 元。多補一個月，交界就落在對帳區間之外。
+ * 再往前的資料仍可能是還原價，需要對更早的期間時要再調大。
  */
-const OFFICIAL_CLOSE_DAYS = 3;
+const OFFICIAL_CLOSE_MONTHS = 3;
 
 /**
  * 官方行情的取用預算。
@@ -608,9 +621,14 @@ export async function historyHandler(query) {
         // 是純粹的浪費，也是最容易讓整個請求逾時的一段。
         // 而今天那根 K 棒在權益曲線裡本來就會被即時報價覆蓋，根本用不到官方值。
         const todayIso = taipeiToday();
-        const recent = raw.slice(-OFFICIAL_CLOSE_DAYS).filter((c) => c.date < todayIso);
-        // 三天通常落在同一個月，跨月時才會有兩份。一份月報表就涵蓋所有要校正的日期。
-        const months = [...new Set(recent.map((c) => c.date.slice(0, 7)))];
+        // 最近 N 個月的月報表。一份就涵蓋整個月，因此校正的天數多寡不影響請求數。
+        const months = [];
+        const cursor = new Date(`${todayIso.slice(0, 7)}-01T00:00:00Z`);
+        for (let i = 0; i < OFFICIAL_CLOSE_MONTHS; i += 1) {
+          months.push(cursor.toISOString().slice(0, 7));
+          cursor.setUTCMonth(cursor.getUTCMonth() - 1);
+        }
+
         const official = new Map();
         for (const monthMap of await Promise.all(
           months.map((m) => loadOfficialMonth(code, suffix === '.TWO' ? 'OTC' : 'TSE', m))
@@ -619,6 +637,7 @@ export async function historyHandler(query) {
         }
 
         let corrected = 0;
+        const recent = raw.filter((c) => c.date < todayIso && official.has(c.date));
         recent.forEach((candle) => {
           const row = official.get(candle.date);
           if (!row) return;
