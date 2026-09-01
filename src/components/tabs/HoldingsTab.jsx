@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Plus, AlertTriangle, Banknote, Download } from 'lucide-react';
+import { Plus, AlertTriangle, Banknote, Download, Upload, FileSpreadsheet } from 'lucide-react';
 import {
   recordTrade,
   removeHolding,
@@ -8,10 +8,18 @@ import {
   recordCashFlow,
   setCash,
   today,
+  restorePortfolio,
+  upsertHolding,
 } from '../../store/portfolioSlice.js';
 import { loadQuotes, loadDailyStats, loadExDividend } from '../../store/marketSlice.js';
 import { tradeCost } from '../../lib/fees.js';
-import { exportJson } from '../../lib/excel.js';
+import {
+  exportExcel,
+  exportJson,
+  importExcel,
+  importJson,
+  holdingsTemplate,
+} from '../../lib/excel.js';
 import { positionSummary } from '../../lib/performance.js';
 import { money, pct, num, int, changeColor } from '../../lib/format.js';
 import StockCard from '../StockCard.jsx';
@@ -102,6 +110,64 @@ export default function HoldingsTab() {
     dispatch(recordTrade({ code, shares, price, date: form.date }));
     setForm({ code: '', shares: '', price: '', date: today() });
     setMessage('');
+  }
+
+  /**
+   * 匯入持股。
+   *
+   * 兩種來源的語意不同，刻意分開處理：
+   *
+   * - **JSON**：這頁匯出的備份，代表「回到那個時間點」，因此整包取代並含
+   *   進出紀錄與現金。會覆蓋現有資料，先要求確認。
+   * - **試算表**：只是一份部位清單，代表「這幾檔現在是這個股數」，
+   *   因此逐列新增或更新，不動其他標的、也不產生交易紀錄。
+   */
+  async function handleImport(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      if (file.name.endsWith('.json')) {
+        const data = await importJson(file);
+        const list = Array.isArray(data) ? data : (data.holdings ?? []);
+        if (!Array.isArray(list) || list.length === 0) {
+          setMessage('檔案中沒有持股資料');
+          return;
+        }
+        const ok = window.confirm(
+          `將以檔案內容取代目前的 ${holdings.length} 檔持股（共 ${list.length} 檔）。\n` +
+            '進出紀錄、資金流水與帳上現金若檔案中有，也會一併取代。\n' +
+            '感興趣標的不受影響。\n\n建議先按「匯出 JSON」備份目前資料。確定要匯入嗎？'
+        );
+        if (!ok) return;
+        dispatch(restorePortfolio(Array.isArray(data) ? { holdings: list } : data));
+        setMessage(`已匯入 ${list.length} 檔持股`);
+      } else {
+        const rows = await importExcel(file);
+        let count = 0;
+        for (const row of rows) {
+          // 欄位名稱容許中英文兩種寫法，降低使用者自製檔案的失敗率。
+          const code = String(row['股票代號'] ?? row.code ?? row.Code ?? '').trim();
+          if (!/^\d{4,6}[A-Z]?$/.test(code)) continue;
+          const shares = Number(row['股數'] ?? row.shares);
+          if (!Number.isFinite(shares) || shares <= 0) continue;
+          dispatch(
+            upsertHolding({
+              code,
+              shares,
+              avgCost: Number(row['平均成本'] ?? row['成本均價'] ?? row.avgCost),
+              note: String(row['備註'] ?? row.note ?? ''),
+            })
+          );
+          count += 1;
+        }
+        setMessage(count === 0 ? '沒有可匯入的資料列，請確認欄位名稱' : `已匯入 ${count} 檔`);
+      }
+    } catch (err) {
+      setMessage(`匯入失敗：${err.message}`);
+    } finally {
+      // 清空 value 才能重複選同一個檔案。
+      e.target.value = '';
+    }
   }
 
   function handleCashFlow() {
@@ -248,30 +314,50 @@ export default function HoldingsTab() {
           </span>
         </h2>
 
-        {rows.length > 0 && (
+        <div className="flex flex-wrap gap-2 text-xs">
+          {rows.length > 0 && (
+            <button
+              type="button"
+              // 匯出的是完整的持股與交易資料，不只畫面上看得到的欄位：
+              // 拿來備份、換裝置、或與人核對數字時都需要成本與進出紀錄。
+              onClick={() =>
+                exportJson(
+                  {
+                    exportedAt: new Date().toISOString(),
+                    holdings,
+                    transactions,
+                    cashFlows,
+                    cash,
+                    // 起算日決定權益曲線從哪天開始算，對帳時少了它會對不出來。
+                    statsStartDate,
+                  },
+                  `持股_${today()}.json`
+                )
+              }
+              className="flex items-center gap-1.5 rounded border border-slate-700 px-2.5 py-1.5 text-slate-300 transition hover:border-slate-500"
+            >
+              <Download size={13} className="text-sky-400" /> 匯出 JSON
+            </button>
+          )}
+
+          <label className="flex cursor-pointer items-center gap-1.5 rounded border border-slate-700 px-2.5 py-1.5 text-slate-300 transition hover:border-slate-500">
+            <Upload size={13} className="text-violet-400" /> 匯入
+            <input
+              type="file"
+              accept=".json,.xlsx,.xls,.csv"
+              onChange={handleImport}
+              className="hidden"
+            />
+          </label>
+
           <button
             type="button"
-            // 匯出的是完整的持股與交易資料，不只畫面上看得到的欄位：
-            // 拿來備份、換裝置、或與人核對數字時都需要成本與進出紀錄。
-            onClick={() =>
-              exportJson(
-                {
-                  exportedAt: new Date().toISOString(),
-                  holdings,
-                  transactions,
-                  cashFlows,
-                  cash,
-                  // 起算日決定權益曲線從哪天開始算，對帳時少了它會對不出來。
-                  statsStartDate,
-                },
-                `持股_${today()}.json`
-              )
-            }
-            className="flex items-center gap-1.5 rounded border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 transition hover:border-slate-500"
+            onClick={() => exportExcel(holdingsTemplate(), '持股匯入範例.xlsx', '持股清單')}
+            className="flex items-center gap-1.5 rounded border border-slate-700 px-2.5 py-1.5 text-slate-300 transition hover:border-slate-500"
           >
-            <Download size={13} className="text-sky-400" /> 匯出 JSON
+            <FileSpreadsheet size={13} className="text-indigo-400" /> 下載範例
           </button>
-        )}
+        </div>
       </div>
 
       {rows.length === 0 ? (

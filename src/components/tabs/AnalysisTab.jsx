@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Plus, Upload, FileSpreadsheet } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import MarketIndices from '../MarketIndices.jsx';
 import { addWatch, removeWatch, updateWatch } from '../../store/portfolioSlice.js';
 import { loadQuotes, loadDailyStats } from '../../store/marketSlice.js';
-import { exportExcel, importExcel, importJson, watchlistTemplate } from '../../lib/excel.js';
 import StockCard from '../StockCard.jsx';
 
 /** 報價自動更新間隔。台股盤中每 30 秒更新一次已足夠，過於頻繁只是浪費上游額度。 */
@@ -48,71 +47,21 @@ export default function AnalysisTab() {
     setMessage('');
   }
 
-  async function handleImport(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      if (file.name.endsWith('.json')) {
-        const data = await importJson(file);
-        const items = Array.isArray(data) ? data : (data.watchlist ?? []);
-        items.forEach((item) => dispatch(addWatch(item)));
-        setMessage(`已匯入 ${items.length} 筆`);
-      } else {
-        const rows = await importExcel(file);
-        let count = 0;
-        for (const row of rows) {
-          // 欄位名稱容許中英文兩種寫法，降低使用者自製檔案的失敗率。
-          const code = String(row['股票代號'] ?? row.code ?? row.Code ?? '').trim();
-          if (!/^\d{4,6}[A-Z]?$/.test(code)) continue;
-          dispatch(
-            addWatch({
-              code,
-              maShort: Number(row['短均線'] ?? row.maShort) || undefined,
-              maLong: Number(row['長均線'] ?? row.maLong) || undefined,
-              note: String(row['備註'] ?? row.note ?? ''),
-            })
-          );
-          count += 1;
-        }
-        setMessage(`已匯入 ${count} 筆`);
-      }
-    } catch (err) {
-      setMessage(`匯入失敗：${err.message}`);
-    } finally {
-      // 清空 value 才能重複選同一個檔案。
-      e.target.value = '';
-    }
-  }
 
   return (
     <div className="space-y-4">
       {/* 大盤放最上面：看自選股之前先知道今天整體是什麼行情。 */}
       <MarketIndices />
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      {/* 匯出、匯入、下載範例都在持股頁。感興趣標的用打字新增就夠快，
+          它沒有成本與股數這類需要備份的數字。 */}
+      <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-sm font-medium text-slate-300">
           感興趣標的
           <span className="tabular ml-2 rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-400">
             {watchlist.length}
           </span>
         </h2>
-
-        {/* 感興趣標的沒有匯出，只有匯入。這份清單隨時在變、也沒有需要備份的數字，
-            要備份的是持股，那個放在持股頁。 */}
-        <div className="flex flex-wrap gap-2 text-xs">
-          <label className="flex cursor-pointer items-center gap-1.5 rounded border border-slate-700 px-2.5 py-1.5 text-slate-300 transition hover:border-slate-500">
-            <Upload size={13} className="text-violet-400" /> 匯入
-            <input type="file" accept=".json,.xlsx,.xls,.csv" onChange={handleImport} className="hidden" />
-          </label>
-
-          <button
-            type="button"
-            onClick={() => exportExcel(watchlistTemplate(), '感興趣標的匯入範例.xlsx', '標的清單')}
-            className="flex items-center gap-1.5 rounded border border-slate-700 px-2.5 py-1.5 text-slate-300 transition hover:border-slate-500"
-          >
-            <FileSpreadsheet size={13} className="text-indigo-400" /> 下載範例
-          </button>
-        </div>
       </div>
 
       <form onSubmit={handleAdd} className="flex gap-2">

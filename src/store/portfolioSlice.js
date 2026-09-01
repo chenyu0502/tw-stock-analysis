@@ -119,6 +119,61 @@ const portfolioSlice = createSlice({
       }
     },
 
+    /**
+     * 還原一份持股備份，**保留感興趣標的**。
+     *
+     * 不能直接用 hydrate：那會連 watchlist 一起覆寫，而持股頁的匯出刻意不含
+     * 感興趣標的，還原時就會把它清空。
+     *
+     * 這是整包取代而非合併——備份的語意是「回到那個時間點」，
+     * 合併只會把已經刪掉的部位又帶回來。呼叫端必須先向使用者確認。
+     */
+    restorePortfolio(state, action) {
+      const data = action.payload ?? {};
+      if (Array.isArray(data.holdings)) state.holdings = data.holdings;
+      if (Array.isArray(data.transactions)) state.transactions = data.transactions;
+      if (Array.isArray(data.cashFlows)) state.cashFlows = data.cashFlows;
+      if (Number.isFinite(data.cash)) state.cash = data.cash;
+      if (data.statsStartDate !== undefined) state.statsStartDate = data.statsStartDate ?? null;
+    },
+
+    /**
+     * 依代號新增或更新一筆持股，**不產生交易紀錄**。
+     *
+     * 給試算表匯入用。匯入的是「目前部位」這個事實，不是一筆買賣事件；
+     * 若改用 recordTrade，每一列都會變成一筆日期為今天的買進，
+     * 權益曲線會把整個部位當成今天才建倉。
+     */
+    upsertHolding(state, action) {
+      const code = String(action.payload.code ?? '').trim();
+      const shares = Number(action.payload.shares);
+      if (!code || !Number.isFinite(shares) || shares <= 0) return;
+
+      clearDeleted(state, 'holdings', code);
+      const avgCost = Number(action.payload.avgCost);
+      const existing = state.holdings.find((h) => h.code === code);
+      const patch = {
+        shares,
+        avgCost: Number.isFinite(avgCost) ? avgCost : (existing?.avgCost ?? 0),
+        note: action.payload.note ?? existing?.note ?? '',
+        // 跨裝置合併靠這個判斷新舊，見 merge.js。
+        updatedAt: Date.now(),
+      };
+
+      if (existing) {
+        Object.assign(existing, patch);
+        return;
+      }
+      state.holdings.push({
+        code,
+        maShort: action.payload.maShort ?? DEFAULT_MA.short,
+        maLong: action.payload.maLong ?? DEFAULT_MA.long,
+        addedAt: Date.now(),
+        openedAt: action.payload.openedAt ?? today(),
+        ...patch,
+      });
+    },
+
     /** 設定統計起算日，傳入空值即清除。 */
     setStatsStartDate(state, action) {
       const value = action.payload;
@@ -298,6 +353,8 @@ const portfolioSlice = createSlice({
 
 export const {
   hydrate,
+  restorePortfolio,
+  upsertHolding,
   addWatch,
   removeWatch,
   updateWatch,
