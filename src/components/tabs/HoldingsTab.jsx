@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Plus, AlertTriangle, Banknote, Download, Upload, FileSpreadsheet } from 'lucide-react';
+import {
+  Plus,
+  AlertTriangle,
+  Banknote,
+  Download,
+  Upload,
+  FileSpreadsheet,
+  Trash2,
+} from 'lucide-react';
 import {
   recordTrade,
   removeHolding,
   updateHolding,
   recordCashFlow,
+  removeCashFlow,
   setCash,
   today,
   restorePortfolio,
@@ -228,9 +237,42 @@ export default function HoldingsTab() {
             <Banknote size={14} className="text-cyan-400" /> 記錄資金進出
           </button>
         </div>
-        <p className="mt-1.5 text-[11px] text-slate-600">
-          資金進出會記入流水並調整現金，績效頁計算報酬率時會把入金排除在獲利之外。
+        <p className="mt-1.5 text-[11px] leading-relaxed text-slate-600">
+          這裡只記<span className="text-slate-500">錢進出證券戶</span>——銀行匯入、出金領回。
+          績效頁計算報酬率時會把它排除在獲利之外，否則入金會被算成賺錢。
+          <br />
+          <span className="text-slate-500">用帳上現金買股票不要記在這裡。</span>
+          那是錢從現金換成股票，沒有離開投資組合；「記錄交易」已經會扣掉現金，
+          再記一筆等於扣兩次。券商實扣金額與成交價乘積不符時（例如先圈存再退還），
+          差額請填在交易的手續費欄。
         </p>
+
+        {cashFlows.length > 0 && (
+          <div className="mt-2 border-t border-slate-800 pt-2">
+            <div className="mb-1 text-[11px] text-slate-500">資金流水</div>
+            <ul className="space-y-0.5">
+              {[...cashFlows]
+                .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+                .map((flow) => (
+                  <li key={flow.id} className="flex items-center gap-2 text-[11px]">
+                    <span className="tabular w-20 shrink-0 text-slate-400">{flow.date}</span>
+                    <span className={`tabular w-24 shrink-0 text-right ${changeColor(flow.amount)}`}>
+                      {money(flow.amount)}
+                    </span>
+                    {flow.note && <span className="min-w-0 truncate text-slate-600">{flow.note}</span>}
+                    <button
+                      type="button"
+                      onClick={() => dispatch(removeCashFlow(flow.id))}
+                      title="刪除這筆"
+                      className="ml-auto shrink-0 rounded p-1 text-slate-600 transition hover:bg-rose-500/10 hover:text-rose-500"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       <ExDividendNotice holdings={holdings} exDividend={exDividend} />
@@ -299,8 +341,11 @@ export default function HoldingsTab() {
             </span>
           )}
         </div>
-        <p className="text-[11px] text-slate-600">
+        <p className="text-[11px] leading-relaxed text-slate-600">
           成本均價請填券商對帳單上已含手續費的數字，程式不會再自行加計。參考試算僅供換算，不影響記錄。
+          <br />
+          <span className="text-slate-500">成交會自動加減帳上現金</span>
+          （買進扣、賣出加），不必再到上面記一筆資金進出。
         </p>
       </form>
 

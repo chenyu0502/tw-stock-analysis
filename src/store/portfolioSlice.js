@@ -232,6 +232,17 @@ const portfolioSlice = createSlice({
         }
       }
 
+      // 成交會直接動到帳上現金。
+      //
+      // 先前只有「記錄資金進出」會改現金，記錄交易不會，於是用帳上現金買股票時
+      // 帳上現金不會減少。使用者只能另外記一筆出金去補，但權益曲線本來就會為
+      // 交易扣一次現金，等於扣了兩次——曲線的歷史現金因此偏掉一個買進金額。
+      //
+      // 買進 shares 為正、金額為流出；賣出 shares 為負，這個式子自動變成流入。
+      // 手續費恆為流出。
+      const cashDelta = shares * price + fee;
+      if (Number.isFinite(cashDelta)) state.cash -= cashDelta;
+
       state.transactions.push({
         id: nanoid(),
         code,
