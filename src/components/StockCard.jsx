@@ -124,7 +124,7 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
             {analysis && (
               <div className="mt-1 flex flex-wrap items-center gap-1">
                 <span
-                  className={`rounded border px-1.5 py-0.5 text-[11px] ${stateColor(
+                  className={`rounded border px-1.5 py-0.5 text-[12px] ${stateColor(
                     analysis.cross.state
                   )}`}
                 >
@@ -134,7 +134,7 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
                 <StanceBadge tag="長" data={analysis.stances?.long} />
                 {analysis.pattern && analysis.pattern.name !== '型態未明' && (
                   <span
-                    className="rounded border border-sky-700/50 bg-sky-950/40 px-1.5 py-0.5 text-[11px] text-sky-300"
+                    className="rounded border border-sky-700/50 bg-sky-950/40 px-1.5 py-0.5 text-[12px] text-sky-300"
                     title={analysis.pattern.evidence}
                   >
                     {analysis.pattern.name}
@@ -223,7 +223,7 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
                     <Stat label="勝率" value={pct(optimizeResult.winRate, 1)} />
                     <Stat label="最大回檔" value={pct(-optimizeResult.maxDrawdown, 2)} />
                   </div>
-                  <p className="mt-1.5 text-[11px] text-slate-500">
+                  <p className="mt-1.5 text-[12px] text-slate-500">
                     回測期間一年，含手續費與交易稅估算。歷史績效不保證未來結果。
                   </p>
                 </div>
@@ -239,7 +239,7 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
                     <StanceRow tag="長期波段" data={analysis.stances.long} />
                   </div>
                   <StanceBacktest candles={candles} periods={[item.maShort, item.maLong]} />
-                  <p className="mt-1.5 text-[10px] leading-relaxed text-slate-600">
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-slate-600">
                     型態由擺盪轉折點的相對位置推得，條件不明確時一律回報「型態未明」，不硬湊。
                     二日法則：收盤穿越均線當天只算警戒，隔日最低（或最高）價再突破前一日，
                     才視為確認，只認收盤價的穿越。
@@ -310,7 +310,7 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
                 )}
               </div>
 
-              <p className="text-[11px] text-slate-600">
+              <p className="text-[12px] text-slate-600">
                 以上為技術面與公開資訊整理，非投資建議。
               </p>
             </>
@@ -352,9 +352,9 @@ function PatternRow({ data }) {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2">
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-[11px] text-slate-500">價格型態</span>
+        <span className="text-[12px] text-slate-500">價格型態</span>
         <span
-          className={`rounded border px-1.5 py-0.5 text-[11px] ${
+          className={`rounded border px-1.5 py-0.5 text-[12px] ${
             unknown
               ? 'border-slate-700/60 bg-slate-800/40 text-slate-500'
               : 'border-sky-700/50 bg-sky-950/40 text-sky-300'
@@ -363,8 +363,8 @@ function PatternRow({ data }) {
           {data.name}
         </span>
       </div>
-      <p className="tabular mt-1 text-[11px] leading-relaxed text-slate-400">{data.evidence}</p>
-      {data.note && <p className="mt-0.5 text-[11px] leading-relaxed text-sky-400/70">{data.note}</p>}
+      <p className="tabular mt-1 text-[12px] leading-relaxed text-slate-400">{data.evidence}</p>
+      {data.note && <p className="mt-0.5 text-[12px] leading-relaxed text-sky-400/70">{data.note}</p>}
     </div>
   );
 }
@@ -374,7 +374,7 @@ function StanceBadge({ tag, data }) {
   const meta = STANCE_LABEL[data.state] ?? STANCE_LABEL.UNKNOWN;
   const style = meta.steady ? 'border-slate-700/60 bg-slate-800/40 text-slate-500' : STANCE_STYLE[meta.side];
   return (
-    <span className={`rounded border px-1.5 py-0.5 text-[11px] ${style}`} title={data.description}>
+    <span className={`rounded border px-1.5 py-0.5 text-[12px] ${style}`} title={data.description}>
       {tag}·{meta.short}
     </span>
   );
@@ -403,11 +403,11 @@ function StanceBacktest({ candles, periods }) {
 
   return (
     <div className="mt-2">
-      <div className="text-[11px] text-slate-500">
+      <div className="text-[12px] text-slate-500">
         回測對照（{results[0].from} 起）
       </div>
       <div className="mt-1 overflow-x-auto">
-        <table className="w-full text-[11px]">
+        <table className="w-full text-[12px]">
           <thead>
             <tr className="text-slate-600">
               <th className="pb-1 text-left font-normal">均線／做法</th>
@@ -443,7 +443,7 @@ function StanceBacktest({ candles, periods }) {
           </tbody>
         </table>
       </div>
-      <p className="mt-1.5 text-[10px] leading-relaxed text-slate-600">
+      <p className="mt-1.5 text-[11px] leading-relaxed text-slate-600">
         隔日開盤成交，含手續費與證交稅，最大回檔逐日結算。
         關鍵是與「單純均線」相比——那才看得出二日法則的那道確認有沒有加分；
         只跟買進持有比會把均線本身的效果算進來。
@@ -473,14 +473,14 @@ function StanceRow({ tag, data }) {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2">
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-[11px] text-slate-500">
+        <span className="text-[12px] text-slate-500">
           {tag}　{data.period} 日均線
         </span>
-        <span className={`rounded border px-1.5 py-0.5 text-[11px] ${STANCE_STYLE[meta.side]}`}>
+        <span className={`rounded border px-1.5 py-0.5 text-[12px] ${STANCE_STYLE[meta.side]}`}>
           {meta.label}
         </span>
       </div>
-      <p className="tabular mt-1 text-[11px] leading-relaxed text-slate-400">{data.description}</p>
+      <p className="tabular mt-1 text-[12px] leading-relaxed text-slate-400">{data.description}</p>
     </div>
   );
 }
@@ -500,7 +500,7 @@ function Section({ title, children }) {
 function Stat({ label, value, tone }) {
   return (
     <div>
-      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className="text-[12px] text-slate-500">{label}</div>
       <div className={`tabular text-sm ${tone === undefined ? 'text-slate-200' : changeColor(tone)}`}>
         {value}
       </div>

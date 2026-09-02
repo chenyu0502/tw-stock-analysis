@@ -52,7 +52,7 @@ export default function MarketIndices() {
           <div key={index.id} className="mt-3 border-t border-slate-800 pt-3">
             <div className="mb-1 flex items-baseline gap-2">
               <span className="text-xs text-slate-300">{index.name}日 K</span>
-              <span className="text-[10px] text-slate-600">
+              <span className="text-[11px] text-slate-600">
                 指數為證交所即時報價，日 K 收盤後由官方資料校正
               </span>
             </div>
@@ -73,7 +73,7 @@ function IndexCard({ index, open, onToggle }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
           <span className="text-xs text-slate-400">{index.name}</span>
-          {index.time && <span className="text-[10px] text-slate-600">{index.time}</span>}
+          {index.time && <span className="text-[11px] text-slate-600">{index.time}</span>}
         </div>
         <div className="flex flex-wrap items-baseline gap-x-2">
           <span className={`tabular text-lg font-semibold ${tone}`}>

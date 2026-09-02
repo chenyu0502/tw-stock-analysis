@@ -40,7 +40,7 @@ export default function ScanPanel({ icon, title, summary, defaultOpen = false, n
       {open && (
         <div className="mt-2">
           {children}
-          {note && <p className="mt-2 text-[10px] leading-relaxed text-slate-600">{note}</p>}
+          {note && <p className="mt-2 text-[11px] leading-relaxed text-slate-600">{note}</p>}
         </div>
       )}
     </section>

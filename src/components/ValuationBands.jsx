@@ -30,7 +30,7 @@ export default function ValuationBands({ bands }) {
       {rows.map(({ key, ...row }) => (
         <BandRow key={key} {...row} />
       ))}
-      <p className="text-[11px] leading-relaxed text-slate-600">
+      <p className="text-[12px] leading-relaxed text-slate-600">
         分位為「目前值高於過去多少比例的交易日」，0% 為歷史最低、100% 為歷史最高。
         本益比與股價淨值比的分位越高代表越貴；殖利率相反，分位越高代表相對便宜。
         取樣區間 {rows[0].data.from} 起共 {rows[0].data.samples} 個交易日。
@@ -53,7 +53,7 @@ function BandRow({ label, data, digits, suffix }) {
           {suffix}
           {/* 顯示到小數一位。四捨五入到整數會讓 84.7% 顯示成 85%，
               而風險門檻正是 85，畫面上會出現「已達 85% 卻沒有提示」的矛盾。 */}
-          <span className="ml-2 text-[11px] text-slate-500">
+          <span className="ml-2 text-[12px] text-slate-500">
             歷史 {pct(percentile, 1)} 分位
           </span>
         </span>
@@ -80,7 +80,7 @@ function BandRow({ label, data, digits, suffix }) {
         />
       </div>
 
-      <div className="tabular flex justify-between text-[10px] text-slate-600">
+      <div className="tabular flex justify-between text-[11px] text-slate-600">
         <span>{num(min, digits)}</span>
         <span>中位 {num(median, digits)}</span>
         <span>{num(max, digits)}</span>

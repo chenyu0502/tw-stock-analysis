@@ -99,7 +99,7 @@ export default function StanceOverview({ holdings }) {
       </div>
 
       {pending > 0 && (
-        <p className="mt-1.5 text-[10px] text-slate-600">
+        <p className="mt-1.5 text-[11px] text-slate-600">
           另有 {pending} 檔的歷史股價尚未載入或不足，未列入表中。
         </p>
       )}
@@ -127,23 +127,23 @@ function MaCell({ stance }) {
     <>
       <td className="whitespace-nowrap py-1.5 text-right">
         <span className="text-slate-300">{num(stance.ma)}</span>
-        <span className="ml-1 text-[10px] text-slate-600">{stance.period}日</span>
-        <div className="text-[10px] text-slate-500">{pct(stance.distancePercent, 1, true)}</div>
+        <span className="ml-1 text-[11px] text-slate-600">{stance.period}日</span>
+        <div className="text-[11px] text-slate-500">{pct(stance.distancePercent, 1, true)}</div>
       </td>
       <td className="whitespace-nowrap py-1.5 text-left">
         {/* 持續狀態不給底色，只有剛穿越、剛確認的那幾檔才跳出來。 */}
         <span
           className={
             meta.steady
-              ? `text-[11px] ${STATE_TEXT[stance.state]}`
-              : `rounded px-1 py-0.5 text-[11px] ${STATE_BADGE[stance.state]}`
+              ? `text-[12px] ${STATE_TEXT[stance.state]}`
+              : `rounded px-1 py-0.5 text-[12px] ${STATE_BADGE[stance.state]}`
           }
           title={stance.description}
         >
           {meta.label}
         </span>
         {stance.daysSince !== null && !meta.steady && (
-          <span className="ml-1 text-[10px] text-slate-600">
+          <span className="ml-1 text-[11px] text-slate-600">
             {stance.daysSince === 0 ? '今日' : `${stance.daysSince} 日前`}
           </span>
         )}
@@ -209,7 +209,7 @@ function Tally({ rows }) {
   return (
     <div className="space-y-0.5">
       {lines.map((line) => (
-        <div key={line.label} className="flex gap-2 text-[11px]">
+        <div key={line.label} className="flex gap-2 text-[12px]">
           <span className="w-16 shrink-0 text-slate-500">{line.label}</span>
           <span className="text-slate-400">{line.parts.join('　') || '—'}</span>
         </div>

@@ -70,7 +70,7 @@ export default function ExDividendNotice({ holdings, exDividend, today = null })
               <tr key={`${item.code}-${item.date}`} className="border-t border-slate-800/60">
                 <td className="py-1 text-slate-400">
                   {item.date.slice(5)}
-                  <span className="ml-1.5 text-[10px] text-slate-600">
+                  <span className="ml-1.5 text-[11px] text-slate-600">
                     {item.days === 0 ? '今日' : `${item.days} 天後`}
                   </span>
                 </td>
@@ -91,7 +91,7 @@ export default function ExDividendNotice({ holdings, exDividend, today = null })
         </table>
       </div>
 
-      <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+      <p className="mt-2 text-[12px] leading-relaxed text-slate-500">
         除息當日股價會直接扣除配息金額，帳面市值同步下降，那不是下跌。
         現金約在除息後一個多月撥付。績效頁的每日損益已在除息日把這筆金額計入，不會出現假性虧損。
         金額為預估值，實際以發放通知為準；含股票股利者股數也會變動，需自行補記。

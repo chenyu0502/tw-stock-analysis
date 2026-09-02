@@ -279,7 +279,7 @@ export default function AiTab() {
                 />
                 <div className="min-w-0">
                   <span
-                    className={`mr-1.5 rounded px-1 py-0.5 text-[10px] ${SEVERITY_BADGE[item.severity]}`}
+                    className={`mr-1.5 rounded px-1 py-0.5 text-[11px] ${SEVERITY_BADGE[item.severity]}`}
                   >
                     {item.category}
                   </span>
@@ -299,7 +299,7 @@ export default function AiTab() {
                 <span className="rounded border border-sky-700/50 bg-sky-950/40 px-2 py-0.5 text-sm text-sky-300">
                   {analysis.pattern.name}
                 </span>
-                <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[11px] text-slate-400">
+                <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[12px] text-slate-400">
                   信心度 {analysis.pattern.confidence}
                 </span>
               </div>
@@ -379,7 +379,7 @@ export default function AiTab() {
             </ul>
           </Panel>
 
-          <p className="text-[11px] text-slate-600">
+          <p className="text-[12px] text-slate-600">
             以上為技術面判讀，非投資建議。AI 產出的敘述可能有誤，價位數字請以上方計算結果為準。
           </p>
         </>
@@ -509,9 +509,9 @@ function compare(now, before) {
 function Stat({ label, value, sub }) {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2.5">
-      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className="text-[12px] text-slate-500">{label}</div>
       <div className="tabular mt-0.5 text-sm font-semibold text-slate-100">{value}</div>
-      {sub && <div className="text-[10px] leading-tight text-slate-600">{sub}</div>}
+      {sub && <div className="text-[11px] leading-tight text-slate-600">{sub}</div>}
     </div>
   );
 }
@@ -520,7 +520,7 @@ function Panel({ title, note, children }) {
   return (
     <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
       <h3 className="text-sm font-medium text-slate-300">{title}</h3>
-      {note && <p className="mb-3 mt-0.5 text-[11px] text-slate-600">{note}</p>}
+      {note && <p className="mb-3 mt-0.5 text-[12px] text-slate-600">{note}</p>}
       <div className={note ? '' : 'mt-3'}>{children}</div>
     </section>
   );
@@ -543,7 +543,7 @@ function TimeframeRow({ label, span, data }) {
     <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium text-slate-200">{label}</span>
-        <span className="text-[11px] text-slate-600">{span}</span>
+        <span className="text-[12px] text-slate-600">{span}</span>
         <span
           className={`rounded border px-2 py-0.5 text-xs ${
             STANCE_STYLE[data.stance] ?? STANCE_STYLE['中性']
@@ -561,7 +561,7 @@ function TimeframeRow({ label, span, data }) {
 function Field({ label, value }) {
   return (
     <div>
-      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className="text-[12px] text-slate-500">{label}</div>
       <p className="text-sm leading-relaxed text-slate-300">{value}</p>
     </div>
   );

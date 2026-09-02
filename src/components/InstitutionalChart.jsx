@@ -67,7 +67,7 @@ export default function InstitutionalChart({ series }) {
           {streaks.map((s) => (
             <span
               key={s.key}
-              className={`rounded border px-1.5 py-0.5 text-[11px] ${
+              className={`rounded border px-1.5 py-0.5 text-[12px] ${
                 s.direction === 'buy'
                   ? 'border-rose-500/30 bg-rose-500/10 text-rose-400'
                   : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
@@ -87,14 +87,14 @@ export default function InstitutionalChart({ series }) {
               <span className="size-2 rounded-sm" style={{ backgroundColor: COLORS[key] }} />
               {/* 以實際交易日數標示，不用查詢時指定的日曆天數。
                   查 30 個日曆天只會拿到約 22 個交易日，寫 30 日會誤導。 */}
-              <span className="text-[11px] text-slate-500">
+              <span className="text-[12px] text-slate-500">
                 {label} {stats.days} 日累計
               </span>
             </div>
             <div className={`tabular mt-0.5 text-sm ${changeColor(stats.totals[key])}`}>
               {int(stats.totals[key])} 張
             </div>
-            <div className="text-[10px] text-slate-600">買超 {stats.buyDays[key]} 日</div>
+            <div className="text-[11px] text-slate-600">買超 {stats.buyDays[key]} 日</div>
           </div>
         ))}
       </div>
@@ -104,9 +104,9 @@ export default function InstitutionalChart({ series }) {
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }} stackOffset="sign">
             <CartesianGrid stroke="#1e293b" vertical={false} />
-            <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 10 }} minTickGap={28} />
+            <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 11 }} minTickGap={28} />
             <YAxis
-              tick={{ fill: '#64748b', fontSize: 10 }}
+              tick={{ fill: '#64748b', fontSize: 11 }}
               width={44}
               tickFormatter={(v) => (Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}k` : v)}
             />
@@ -115,12 +115,12 @@ export default function InstitutionalChart({ series }) {
                 backgroundColor: '#0f172a',
                 border: '1px solid #334155',
                 borderRadius: 8,
-                fontSize: 12,
+                fontSize: 14,
               }}
               labelStyle={{ color: '#94a3b8' }}
               formatter={(value, name) => [`${num(value, 0)} 張`, name]}
             />
-            <Legend wrapperStyle={{ fontSize: 11, color: '#94a3b8' }} iconSize={8} />
+            <Legend wrapperStyle={{ fontSize: 12, color: '#94a3b8' }} iconSize={8} />
             <ReferenceLine y={0} stroke="#475569" />
             {/* stackOffset="sign" 讓正值往上堆、負值往下堆，兩者不會互相抵銷成單一淨值 */}
             <Bar dataKey="外資" stackId="a" fill={COLORS.foreign} />
@@ -130,7 +130,7 @@ export default function InstitutionalChart({ series }) {
         </ResponsiveContainer>
       </div>
 
-      <p className="text-[11px] text-slate-600">資料來源 FinMind，單位為張，正值為買超。</p>
+      <p className="text-[12px] text-slate-600">資料來源 FinMind，單位為張，正值為買超。</p>
     </div>
   );
 }

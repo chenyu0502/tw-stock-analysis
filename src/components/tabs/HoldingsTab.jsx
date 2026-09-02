@@ -237,7 +237,7 @@ export default function HoldingsTab() {
             <Banknote size={14} className="text-cyan-400" /> 記錄資金進出
           </button>
         </div>
-        <p className="mt-1.5 text-[11px] leading-relaxed text-slate-600">
+        <p className="mt-1.5 text-[12px] leading-relaxed text-slate-600">
           這裡只記<span className="text-slate-500">錢進出證券戶</span>——銀行匯入、出金領回。
           績效頁計算報酬率時會把它排除在獲利之外，否則入金會被算成賺錢。
           <br />
@@ -249,12 +249,12 @@ export default function HoldingsTab() {
 
         {cashFlows.length > 0 && (
           <div className="mt-2 border-t border-slate-800 pt-2">
-            <div className="mb-1 text-[11px] text-slate-500">資金流水</div>
+            <div className="mb-1 text-[12px] text-slate-500">資金流水</div>
             <ul className="space-y-0.5">
               {[...cashFlows]
                 .sort((a, b) => String(b.date).localeCompare(String(a.date)))
                 .map((flow) => (
-                  <li key={flow.id} className="flex items-center gap-2 text-[11px]">
+                  <li key={flow.id} className="flex items-center gap-2 text-[12px]">
                     <span className="tabular w-20 shrink-0 text-slate-400">{flow.date}</span>
                     <span className={`tabular w-24 shrink-0 text-right ${changeColor(flow.amount)}`}>
                       {money(flow.amount)}
@@ -341,7 +341,7 @@ export default function HoldingsTab() {
             </span>
           )}
         </div>
-        <p className="text-[11px] leading-relaxed text-slate-600">
+        <p className="text-[12px] leading-relaxed text-slate-600">
           成本均價請填券商對帳單上已含手續費的數字，程式不會再自行加計。參考試算僅供換算，不影響記錄。
           <br />
           <span className="text-slate-500">成交會自動加減帳上現金</span>
@@ -445,7 +445,7 @@ export default function HoldingsTab() {
             />
           ))}
 
-          <p className="px-1 text-[11px] leading-relaxed text-slate-600">
+          <p className="px-1 text-[12px] leading-relaxed text-slate-600">
             股數與成本均價可直接點擊修改，用來對齊券商對帳單——零股的手續費有最低收費，
             攤進去之後的成本均價不會是程式算得出來的數字。
             這種修改不會產生交易紀錄，因此與「記錄交易」不同：它只改現況，不改歷史。
@@ -460,7 +460,7 @@ export default function HoldingsTab() {
 function SummaryCard({ label, value, sub, tone }) {
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-3">
-      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className="text-[12px] text-slate-500">{label}</div>
       <div
         className={`tabular mt-1 text-base font-semibold ${
           tone === undefined ? 'text-slate-100' : changeColor(tone)
@@ -469,7 +469,7 @@ function SummaryCard({ label, value, sub, tone }) {
         {value}
       </div>
       {sub && (
-        <div className={`tabular text-[11px] ${tone === undefined ? 'text-slate-500' : changeColor(tone)}`}>
+        <div className={`tabular text-[12px] ${tone === undefined ? 'text-slate-500' : changeColor(tone)}`}>
           {sub}
         </div>
       )}
@@ -536,7 +536,7 @@ function EditableCell({ label, value, format, onCommit, integer = false, step = 
   if (!editing) {
     return (
       <div>
-        <div className="text-[10px] text-slate-500">{label}</div>
+        <div className="text-[11px] text-slate-500">{label}</div>
         <button
           type="button"
           onClick={start}
@@ -551,7 +551,7 @@ function EditableCell({ label, value, format, onCommit, integer = false, step = 
 
   return (
     <div>
-      <div className="text-[10px] text-slate-500">{label}</div>
+      <div className="text-[11px] text-slate-500">{label}</div>
       <input
         type="number"
         min="0"
@@ -573,10 +573,10 @@ function EditableCell({ label, value, format, onCommit, integer = false, step = 
 function Cell({ label, value, sub, tone }) {
   return (
     <div>
-      <div className="text-[10px] text-slate-500">{label}</div>
+      <div className="text-[11px] text-slate-500">{label}</div>
       <div className={tone === undefined ? 'text-slate-200' : changeColor(tone)}>{value}</div>
       {sub && (
-        <div className={`text-[10px] ${tone === undefined ? 'text-slate-500' : changeColor(tone)}`}>{sub}</div>
+        <div className={`text-[11px] ${tone === undefined ? 'text-slate-500' : changeColor(tone)}`}>{sub}</div>
       )}
     </div>
   );

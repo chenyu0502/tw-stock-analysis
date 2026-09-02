@@ -45,7 +45,7 @@ export default function PriceChart({ candles, shortPeriod, longPeriod }) {
           <CartesianGrid stroke="#1e293b" vertical={false} />
           <XAxis
             dataKey="date"
-            tick={{ fill: '#64748b', fontSize: 10 }}
+            tick={{ fill: '#64748b', fontSize: 11 }}
             // 資料點多達兩百餘筆，讓 recharts 自行決定刻度密度會過於擁擠。
             minTickGap={48}
             tickFormatter={(d) => d.slice(5)}
@@ -53,7 +53,7 @@ export default function PriceChart({ candles, shortPeriod, longPeriod }) {
           <YAxis
             yAxisId="price"
             domain={['dataMin - 2', 'dataMax + 2']}
-            tick={{ fill: '#64748b', fontSize: 10 }}
+            tick={{ fill: '#64748b', fontSize: 11 }}
             width={44}
             tickFormatter={(v) => v.toFixed(0)}
           />
@@ -64,7 +64,7 @@ export default function PriceChart({ candles, shortPeriod, longPeriod }) {
               backgroundColor: '#0f172a',
               border: '1px solid #334155',
               borderRadius: 8,
-              fontSize: 12,
+              fontSize: 14,
             }}
             labelStyle={{ color: '#94a3b8' }}
             formatter={(value, name) => {

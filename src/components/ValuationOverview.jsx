@@ -108,14 +108,14 @@ export default function ValuationOverview({ holdings }) {
               .forEach((h) => dispatch(loadFundamentals({ code: h.code })))
           }
           disabled={loading}
-          className="mt-2 flex items-center gap-1.5 rounded-lg bg-sky-600 px-2.5 py-1.5 text-[11px] font-medium text-white transition hover:bg-sky-500 disabled:opacity-40"
+          className="mt-2 flex items-center gap-1.5 rounded-lg bg-sky-600 px-2.5 py-1.5 text-[12px] font-medium text-white transition hover:bg-sky-500 disabled:opacity-40"
         >
           {loading ? <RefreshCw size={12} className="animate-spin" /> : null}
           {loading ? '載入中…' : `載入 ${pending} 檔的估值資料`}
         </button>
       )}
 
-      <p className="mt-2 text-[10px] leading-relaxed text-slate-600">
+      <p className="mt-2 text-[11px] leading-relaxed text-slate-600">
         分位為「目前值高於過去多少比例的交易日」，以各標的自己近五年的區間為基準，不與其他標的比較。
         數值下方的小字是同期間的中位數，用來看目前離常態多遠。
         本益比與股價淨值比的分位越高代表越貴；殖利率相反，分位越高代表相對便宜。
@@ -159,7 +159,7 @@ function BandCells({ band, digits, suffix, higherIsExpensive = false }) {
           {num(current, digits)}
           {suffix}
         </span>
-        <div className="text-[10px] text-slate-600">
+        <div className="text-[11px] text-slate-600">
           中位 {num(median, digits)}
           {suffix}
         </div>

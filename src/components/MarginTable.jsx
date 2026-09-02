@@ -105,7 +105,7 @@ export default function MarginTable({ holdings, marginMap, quotes }) {
         </table>
       </div>
 
-      <p className="mt-1.5 text-[10px] leading-relaxed text-slate-600">
+      <p className="mt-1.5 text-[11px] leading-relaxed text-slate-600">
         餘額與增減的單位是張，依變動幅度由大到小排列。琥珀色代表該格已達規則門檻
         （融資 {THRESHOLDS.marginSurgeLots} 張且 {THRESHOLDS.marginSurgePercent}%、
         融券 {THRESHOLDS.shortSurgeLots} 張且 {THRESHOLDS.shortSurgePercent}%、

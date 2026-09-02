@@ -4,6 +4,24 @@
   /* 台股慣例：紅漲綠跌。整站以這兩個語意色為準，不要直接用 red/green。 */
   --color-up: oklch(0.64 0.21 25);
   --color-down: oklch(0.7 0.16 158);
+
+  /*
+   * 字級整體放大一級。
+   *
+   * 每個名稱都往上取原本下一級的尺寸：xs 由 12 變 14、sm 由 14 變 16、
+   * base 由 16 變 18、lg 由 18 變 20。改在這裡是因為全站有一百多處用到
+   * 這些類別，逐一改動既容易漏掉，日後想再調整也得再翻一次。
+   *
+   * 行高一併帶上去，只放大字級會讓行距相對變擠。
+   */
+  --text-xs: 0.875rem;
+  --text-xs--line-height: calc(1.25 / 0.875);
+  --text-sm: 1rem;
+  --text-sm--line-height: calc(1.5 / 1);
+  --text-base: 1.125rem;
+  --text-base--line-height: calc(1.75 / 1.125);
+  --text-lg: 1.25rem;
+  --text-lg--line-height: calc(1.75 / 1.25);
 }
 
 html,

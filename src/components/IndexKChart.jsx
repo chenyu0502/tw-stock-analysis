@@ -111,13 +111,13 @@ export default function IndexKChart({ candles }) {
             <CartesianGrid stroke="#1e293b" vertical={false} />
             <XAxis
               dataKey="date"
-              tick={{ fill: '#64748b', fontSize: 10 }}
+              tick={{ fill: '#64748b', fontSize: 11 }}
               minTickGap={40}
               tickFormatter={(d) => d.slice(5)}
             />
             <YAxis
               domain={domain}
-              tick={{ fill: '#64748b', fontSize: 10 }}
+              tick={{ fill: '#64748b', fontSize: 11 }}
               width={52}
               tickFormatter={(v) => (v >= 10000 ? Math.round(v).toLocaleString('zh-TW') : v.toFixed(0))}
             />
@@ -144,7 +144,7 @@ export default function IndexKChart({ candles }) {
         </ResponsiveContainer>
       </div>
 
-      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-slate-500">
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
         {MA_LINES.map((m) => (
           <span key={m.key} className="flex items-center gap-1">
             <span className="inline-block h-0.5 w-3" style={{ backgroundColor: m.color }} />
@@ -207,7 +207,7 @@ function KTooltip({ active, payload }) {
   const change = row.close - row.open;
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-950 p-2 text-[11px]">
+    <div className="rounded-lg border border-slate-700 bg-slate-950 p-2 text-[12px]">
       <div className="tabular font-medium text-slate-200">{row.date}</div>
       <div className="tabular mt-1 grid grid-cols-2 gap-x-3 text-slate-400">
         <span>開 {num(row.open)}</span>

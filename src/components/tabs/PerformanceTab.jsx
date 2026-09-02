@@ -335,7 +335,7 @@ export default function PerformanceTab() {
       >
         <PnlCalendar curve={curve} />
         {noHistoryCodes.length > 0 && (
-          <p className="mt-2 rounded-lg border border-amber-900/60 bg-amber-950/30 px-2.5 py-2 text-[11px] leading-relaxed text-amber-400">
+          <p className="mt-2 rounded-lg border border-amber-900/60 bg-amber-950/30 px-2.5 py-2 text-[12px] leading-relaxed text-amber-400">
             有 {noHistoryCodes.length} 檔尚未取得歷史股價（{noHistoryCodes.join('、')}），
             這些標的在月曆中沒有每日損益，只有今天以現價計算。
             回到持股頁或分析頁重新載入即可補齊；若持續失敗，多半是上游暫時取不到資料。
@@ -362,12 +362,12 @@ export default function PerformanceTab() {
                 <CartesianGrid stroke="#1e293b" vertical={false} />
                 <XAxis
                   dataKey="month"
-                  tick={{ fill: '#64748b', fontSize: 10 }}
+                  tick={{ fill: '#64748b', fontSize: 11 }}
                   tickFormatter={(m) => m.slice(2)}
                   minTickGap={24}
                 />
                 <YAxis
-                  tick={{ fill: '#64748b', fontSize: 10 }}
+                  tick={{ fill: '#64748b', fontSize: 11 }}
                   width={48}
                   tickFormatter={(v) => `${Math.round(v / 1000)}k`}
                 />
@@ -376,7 +376,7 @@ export default function PerformanceTab() {
                     backgroundColor: '#0f172a',
                     border: '1px solid #334155',
                     borderRadius: 8,
-                    fontSize: 12,
+                    fontSize: 14,
                   }}
                   labelStyle={{ color: '#94a3b8' }}
                   formatter={(value) => [money(value), '損益']}
@@ -425,7 +425,7 @@ export default function PerformanceTab() {
                     <td className="py-1.5 text-slate-300">
                       {y.year}
                       {y.partial && (
-                        <span className="ml-1.5 rounded bg-slate-800 px-1 py-0.5 text-[10px] text-slate-500">
+                        <span className="ml-1.5 rounded bg-slate-800 px-1 py-0.5 text-[11px] text-slate-500">
                           自 {y.firstDate?.slice(5)} 起
                         </span>
                       )}
@@ -511,7 +511,7 @@ export default function PerformanceTab() {
           )}
         </div>
 
-        <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+        <p className="mt-2 text-[12px] leading-relaxed text-slate-500">
           起算日設為那天，每日損益月曆、月走勢與歷年績效即可自該日完整回推。
         </p>
       </section>
@@ -523,7 +523,7 @@ function Panel({ title, note, children }) {
   return (
     <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
       <h3 className="text-sm font-medium text-slate-300">{title}</h3>
-      {note && <p className="mb-3 mt-0.5 text-[11px] leading-relaxed text-slate-600">{note}</p>}
+      {note && <p className="mb-3 mt-0.5 text-[12px] leading-relaxed text-slate-600">{note}</p>}
       <div className={note ? '' : 'mt-3'}>{children}</div>
     </section>
   );
@@ -532,7 +532,7 @@ function Panel({ title, note, children }) {
 function Summary({ label, value, sub, tone }) {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2.5">
-      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className="text-[12px] text-slate-500">{label}</div>
       <div
         className={`tabular mt-0.5 text-sm font-semibold ${
           tone === undefined ? 'text-slate-100' : changeColor(tone)
@@ -540,7 +540,7 @@ function Summary({ label, value, sub, tone }) {
       >
         {value}
       </div>
-      {sub && <div className="text-[10px] text-slate-600">{sub}</div>}
+      {sub && <div className="text-[11px] text-slate-600">{sub}</div>}
     </div>
   );
 }

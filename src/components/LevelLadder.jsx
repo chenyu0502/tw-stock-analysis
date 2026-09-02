@@ -70,12 +70,12 @@ export default function LevelLadder({ levels, notes = [] }) {
               {row.sources.map((s) => (
                 <span
                   key={s}
-                  className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400"
+                  className="rounded bg-slate-800 px-1.5 py-0.5 text-[11px] text-slate-400"
                 >
                   {SOURCE_LABEL[s] ?? s}
                 </span>
               ))}
-              <span className="text-[10px] text-slate-600">
+              <span className="text-[11px] text-slate-600">
                 歷史觸及 {row.touches} 次
                 {row.lastTouchDate && `，最近 ${row.lastTouchDate}`}
               </span>

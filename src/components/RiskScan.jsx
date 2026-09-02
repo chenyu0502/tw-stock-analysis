@@ -265,14 +265,14 @@ export default function RiskScan({ holdings }) {
                     .forEach((h) => dispatch(loadFundamentals({ code: h.code })))
                 }
                 disabled={loadingFundamentals}
-                className="mt-2 flex items-center gap-1.5 rounded-lg bg-sky-600 px-2.5 py-1.5 text-[11px] font-medium text-white transition hover:bg-sky-500 disabled:opacity-40"
+                className="mt-2 flex items-center gap-1.5 rounded-lg bg-sky-600 px-2.5 py-1.5 text-[12px] font-medium text-white transition hover:bg-sky-500 disabled:opacity-40"
               >
                 {loadingFundamentals ? <RefreshCw size={12} className="animate-spin" /> : null}
                 {loadingFundamentals ? '載入中…' : `載入 ${pending} 檔的基本面`}
               </button>
             )}
 
-            <p className="mt-1.5 text-[10px] leading-relaxed text-slate-600">
+            <p className="mt-1.5 text-[11px] leading-relaxed text-slate-600">
               依固定門檻逐條檢查，不經過 AI，同樣的資料一定得到同樣的結果。每項都附觸發它的實際數值。
               {pending > 0 &&
                 `財報那幾條規則需要另外查基本面（一檔五個資料集），尚有 ${pending} 檔未載入。`}
@@ -295,7 +295,7 @@ export default function RiskScan({ holdings }) {
 function ScopePicker({ scope, counts, onChange }) {
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <span className="text-[11px] text-slate-500">掃描範圍</span>
+      <span className="text-[12px] text-slate-500">掃描範圍</span>
       <div className="flex overflow-hidden rounded-lg border border-slate-800">
         {SCOPES.map((s) => {
           const active = scope === s.id;
@@ -304,7 +304,7 @@ function ScopePicker({ scope, counts, onChange }) {
               key={s.id}
               type="button"
               onClick={() => onChange(s.id)}
-              className={`px-2.5 py-1 text-[11px] transition ${
+              className={`px-2.5 py-1 text-[12px] transition ${
                 active
                   ? 'bg-sky-600/25 text-sky-300'
                   : 'text-slate-500 hover:bg-slate-800/60 hover:text-slate-300'
@@ -318,7 +318,7 @@ function ScopePicker({ scope, counts, onChange }) {
           );
         })}
       </div>
-      <span className="text-[10px] text-slate-600">
+      <span className="text-[11px] text-slate-600">
         預設只掃股票：ETF 沒有估值與財報資料，混進來會讓估值面板整排「無資料」。
         融資融券與型態對 ETF 一樣適用，切過去照樣有東西看。
       </span>
@@ -333,7 +333,7 @@ function RiskRow({ row }) {
       <div className="flex flex-wrap items-baseline gap-x-2">
         <span className="tabular text-sm font-medium text-slate-200">{row.code}</span>
         {row.name && <span className="text-xs text-slate-500">{row.name}</span>}
-        <span className="text-[10px] text-slate-600">{row.risks.length} 項</span>
+        <span className="text-[11px] text-slate-600">{row.risks.length} 項</span>
       </div>
       <ul className="mt-1 space-y-1">
         {row.risks.map((item) => (
@@ -344,11 +344,11 @@ function RiskRow({ row }) {
             />
             <div className="min-w-0">
               <span
-                className={`mr-1 rounded px-1 py-0.5 text-[10px] ${SEVERITY_BADGE[item.severity]}`}
+                className={`mr-1 rounded px-1 py-0.5 text-[11px] ${SEVERITY_BADGE[item.severity]}`}
               >
                 {item.category}
               </span>
-              <span className="text-[11px] leading-relaxed text-slate-300">{item.message}</span>
+              <span className="text-[12px] leading-relaxed text-slate-300">{item.message}</span>
             </div>
           </li>
         ))}

@@ -101,7 +101,7 @@ export default function PnlCalendar({ curve }) {
       <div className="flex gap-1">
         <div className="grid flex-1 grid-cols-7 gap-1">
           {WEEKDAYS.map((w) => (
-            <div key={w} className="pb-1 text-center text-[10px] text-slate-600">
+            <div key={w} className="pb-1 text-center text-[11px] text-slate-600">
               {w}
             </div>
           ))}
@@ -114,13 +114,15 @@ export default function PnlCalendar({ curve }) {
                 key={cell.date}
                 // 格子只顯示到千位，對帳時需要完整金額，滑鼠停留即可看到。
                 title={hasData ? `${cell.date}　${money(cell.pnl)}` : undefined}
-                className={`rounded border p-1 text-center ${
+                // 左右內距收窄：字級放大一級之後，375px 寬的手機上「+114k」這種
+                // 五個字元的金額會擠出格子。上下維持原本的間距。
+                className={`rounded border px-0.5 py-1 text-center ${
                   hasData ? 'border-slate-800 bg-slate-900/60' : 'border-transparent'
                 }`}
               >
-                <div className="tabular text-[10px] text-slate-500">{cell.day}</div>
+                <div className="tabular text-[11px] text-slate-500">{cell.day}</div>
                 {hasData && (
-                  <div className={`tabular text-[10px] leading-tight ${changeColor(cell.pnl)}`}>
+                  <div className={`tabular text-[11px] leading-tight ${changeColor(cell.pnl)}`}>
                     {Math.abs(cell.pnl) >= 1000
                       ? `${cell.pnl > 0 ? '+' : '-'}${Math.round(Math.abs(cell.pnl) / 1000)}k`
                       : Math.round(cell.pnl)}
@@ -133,7 +135,7 @@ export default function PnlCalendar({ curve }) {
 
         {/* 週損益欄，與月曆各列對齊 */}
         <div className="grid w-14 grid-rows-[auto] gap-1">
-          <div className="pb-1 text-center text-[10px] text-slate-600">週</div>
+          <div className="pb-1 text-center text-[11px] text-slate-600">週</div>
           {weekTotals.map((week, i) => (
             <div
               key={`week-${i}`}
@@ -143,7 +145,7 @@ export default function PnlCalendar({ curve }) {
                   ? `${week.from} ～ ${week.to}　${money(week.total)}（${week.days} 個交易日）`
                   : undefined
               }
-              className={`tabular flex items-center justify-center rounded border border-slate-800/60 text-[10px] ${changeColor(
+              className={`tabular flex items-center justify-center rounded border border-slate-800/60 text-[11px] ${changeColor(
                 week?.total ?? null
               )}`}
             >
