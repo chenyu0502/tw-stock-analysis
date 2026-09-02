@@ -434,20 +434,31 @@ export default function PerformanceTab() {
               <tbody className="tabular">
                 {yearly.map((y) => (
                   <tr key={y.year} className="border-t border-slate-800/60">
+                    {/* 「自 ⋯ 起」在窄螢幕換到第二行。與年度併在一行會把這一欄
+                        撐寬，右邊兩欄的百分比就被擠到換行。寬螢幕空間夠，維持同一行。 */}
                     <td className="py-1.5 text-slate-300">
-                      {y.year}
+                      <div className="sm:inline">{y.year}</div>
                       {y.partial && (
-                        <span className="ml-1.5 rounded bg-slate-800 px-1 py-0.5 text-[11px] text-slate-500">
+                        <div className="rounded bg-slate-800 px-1 py-0.5 text-[11px] whitespace-nowrap text-slate-500 sm:ml-1.5 sm:inline">
                           自 {y.firstDate?.slice(5)} 起
-                        </span>
+                        </div>
                       )}
                     </td>
-                    <td className={`py-1.5 text-right ${changeColor(y.pnl)}`}>{money(y.pnl)}</td>
-                    <td className="py-1.5 text-right text-slate-400">{money(y.endNetWorth)}</td>
-                    <td className={`py-1.5 text-right ${changeColor(y.returnPercent)}`}>
+                    {/* 百分比與金額一律不折行：折了之後同一列高高低低，很難橫向比較。 */}
+                    <td className={`py-1.5 text-right whitespace-nowrap ${changeColor(y.pnl)}`}>
+                      {money(y.pnl)}
+                    </td>
+                    <td className="py-1.5 text-right whitespace-nowrap text-slate-400">
+                      {money(y.endNetWorth)}
+                    </td>
+                    <td
+                      className={`py-1.5 text-right whitespace-nowrap ${changeColor(y.returnPercent)}`}
+                    >
                       {pct(y.returnPercent, 2, true)}
                     </td>
-                    <td className={`py-1.5 text-right ${changeColor(y.cumulativeReturnPercent)}`}>
+                    <td
+                      className={`py-1.5 text-right whitespace-nowrap ${changeColor(y.cumulativeReturnPercent)}`}
+                    >
                       {pct(y.cumulativeReturnPercent, 2, true)}
                     </td>
                   </tr>
