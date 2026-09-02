@@ -302,9 +302,11 @@ export default function PerformanceTab() {
             <tbody className="tabular">
               {today.items.map((item) => (
                 <tr key={item.code} className="border-t border-slate-800/60">
+                  {/* 代號與名稱分兩行。字級放大之後併在一行會把這一欄撐得很寬，
+                      右邊的數字欄跟著被擠窄；分行之後這一欄只需要容納較長的那一個。 */}
                   <td className="py-1.5">
-                    <span className="text-slate-300">{item.code}</span>
-                    {item.name && <span className="ml-1.5 text-slate-500">{item.name}</span>}
+                    <div className="text-slate-300">{item.code}</div>
+                    {item.name && <div className="text-slate-500">{item.name}</div>}
                   </td>
                   <td className="py-1.5 text-right text-slate-300">{num(item.price)}</td>
                   <td className="py-1.5 text-right text-slate-400">{int(item.shares)}</td>
