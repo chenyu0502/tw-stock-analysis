@@ -302,17 +302,20 @@ export default function PerformanceTab() {
             <tbody className="tabular">
               {today.items.map((item) => (
                 <tr key={item.code} className="border-t border-slate-800/60">
-                  {/* 代號與名稱分兩行。字級放大之後併在一行會把這一欄撐得很寬，
-                      右邊的數字欄跟著被擠窄；分行之後這一欄只需要容納較長的那一個。
+                  {/* 窄螢幕代號與名稱各佔一行，寬螢幕併回同一行。
+                      手機上併在一行會把這一欄撐得很寬，右邊的數字欄跟著被擠窄；
+                      桌機空間足夠，一行比較好掃視。
 
-                      名稱不折行。表格會自動把欄位縮到剛好放不下最長名稱的寬度，
-                      於是「富邦特選高股息30」這種八字加數字的會多折一行，
-                      同一欄裡有的兩行有的三行，看起來像壞掉。寧可讓表格橫向捲動
-                      ——外層本來就有 overflow-x-auto。 */}
+                      兩種寬度都不讓名稱折行。表格會自動把欄位縮到剛好放不下最長
+                      名稱的寬度，於是「富邦特選高股息30」這種八字加數字的會多折
+                      一行，同一欄裡有的兩行有的三行，看起來像壞掉。寧可讓表格
+                      橫向捲動——外層本來就有 overflow-x-auto。 */}
                   <td className="py-1.5">
-                    <div className="text-slate-300">{item.code}</div>
+                    <div className="text-slate-300 sm:inline">{item.code}</div>
                     {item.name && (
-                      <div className="whitespace-nowrap text-slate-500">{item.name}</div>
+                      <div className="whitespace-nowrap text-slate-500 sm:ml-1.5 sm:inline">
+                        {item.name}
+                      </div>
                     )}
                   </td>
                   <td className="py-1.5 text-right text-slate-300">{num(item.price)}</td>
