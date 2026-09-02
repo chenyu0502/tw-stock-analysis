@@ -17,6 +17,9 @@ export default function PnlCalendar({ curve }) {
   const latestMonth = curve.length > 0 ? curve[curve.length - 1].date.slice(0, 7) : null;
   const [month, setMonth] = useState(latestMonth);
 
+  // 被點選的格子。手機沒有 hover，title 看不到，改由下方那一行顯示完整金額。
+  const [selected, setSelected] = useState(null);
+
   const activeMonth = month ?? latestMonth;
   const pnlMap = useMemo(
     () => (activeMonth ? dailyPnlOfMonth(curve, activeMonth) : new Map()),
@@ -68,11 +71,17 @@ export default function PnlCalendar({ curve }) {
     return <div className="py-8 text-center text-sm text-slate-500">無損益資料</div>;
   }
 
-  /** 依偏移量切換月份。 */
+  /** 依偏移量切換月份。換月後原本選的格子已不存在，一併清掉。 */
   function shiftMonth(offset) {
     const [year, mon] = activeMonth.split('-').map(Number);
     const d = new Date(year, mon - 1 + offset, 1);
     setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    setSelected(null);
+  }
+
+  /** 點選一格；再點同一格取消，才不會有選了就取消不掉的死角。 */
+  function pick(key, label, amount) {
+    setSelected((prev) => (prev?.key === key ? null : { key, label, amount }));
   }
 
   return (
@@ -109,16 +118,21 @@ export default function PnlCalendar({ curve }) {
           {cells.map((cell, i) => {
             if (!cell) return <div key={`blank-${i}`} />;
             const hasData = cell.pnl !== null;
+            const key = `day-${cell.date}`;
             return (
-              <div
+              <button
                 key={cell.date}
-                // 格子只顯示到千位，對帳時需要完整金額，滑鼠停留即可看到。
+                type="button"
+                disabled={!hasData}
+                onClick={() => pick(key, cell.date, cell.pnl)}
+                // 格子只顯示到千位，對帳時需要完整金額。
+                // 桌機滑鼠停留看 title，手機沒有 hover，改點一下顯示在下方那一行。
                 title={hasData ? `${cell.date}　${money(cell.pnl)}` : undefined}
                 // 左右內距收窄：字級放大一級之後，375px 寬的手機上「+114k」這種
                 // 五個字元的金額會擠出格子。上下維持原本的間距。
                 className={`rounded border px-0.5 py-1 text-center ${
                   hasData ? 'border-slate-800 bg-slate-900/60' : 'border-transparent'
-                }`}
+                } ${selected?.key === key ? 'ring-1 ring-sky-500' : ''}`}
               >
                 <div className="tabular text-[11px] text-slate-500">{cell.day}</div>
                 {hasData && (
@@ -128,7 +142,7 @@ export default function PnlCalendar({ curve }) {
                       : Math.round(cell.pnl)}
                   </div>
                 )}
-              </div>
+              </button>
             );
           })}
         </div>
@@ -136,27 +150,53 @@ export default function PnlCalendar({ curve }) {
         {/* 週損益欄，與月曆各列對齊 */}
         <div className="grid w-14 grid-rows-[auto] gap-1">
           <div className="pb-1 text-center text-[11px] text-slate-600">週</div>
-          {weekTotals.map((week, i) => (
-            <div
-              key={`week-${i}`}
-              // 與日期格一致：格子只顯示到千位，對帳時需要完整金額，滑鼠停留即可看到。
-              title={
-                week
-                  ? `${week.from} ～ ${week.to}　${money(week.total)}（${week.days} 個交易日）`
-                  : undefined
-              }
-              className={`tabular flex items-center justify-center rounded border border-slate-800/60 text-[11px] ${changeColor(
-                week?.total ?? null
-              )}`}
-            >
-              {week === null
-                ? ''
-                : Math.abs(week.total) >= 1000
-                  ? `${week.total > 0 ? '+' : '-'}${Math.round(Math.abs(week.total) / 1000)}k`
-                  : Math.round(week.total)}
-            </div>
-          ))}
+          {weekTotals.map((week, i) => {
+            const key = `week-${i}`;
+            return (
+              <button
+                key={key}
+                type="button"
+                disabled={!week}
+                onClick={() =>
+                  pick(key, `${week.from} ～ ${week.to}（${week.days} 個交易日）`, week.total)
+                }
+                // 與日期格一致：格子只顯示到千位，對帳時需要完整金額。
+                title={
+                  week
+                    ? `${week.from} ～ ${week.to}　${money(week.total)}（${week.days} 個交易日）`
+                    : undefined
+                }
+                className={`tabular flex items-center justify-center rounded border border-slate-800/60 text-[11px] ${changeColor(
+                  week?.total ?? null
+                )} ${selected?.key === key ? 'ring-1 ring-sky-500' : ''}`}
+              >
+                {week === null
+                  ? ''
+                  : Math.abs(week.total) >= 1000
+                    ? `${week.total > 0 ? '+' : '-'}${Math.round(Math.abs(week.total) / 1000)}k`
+                    : Math.round(week.total)}
+              </button>
+            );
+          })}
         </div>
+      </div>
+
+      {/*
+        點選後的完整金額。
+        手機沒有 hover，title 永遠看不到，格子本身又只顯示到千位。
+        固定佔一行高度，選與不選之間不會讓下方內容跳動。
+      */}
+      <div className="mt-2 min-h-5 text-center text-[11px]">
+        {selected ? (
+          <span className="tabular">
+            <span className="text-slate-400">{selected.label}</span>
+            <span className={`ml-2 font-medium ${changeColor(selected.amount)}`}>
+              {money(selected.amount)}
+            </span>
+          </span>
+        ) : (
+          <span className="text-slate-600">點一下日期或右側週欄，顯示完整金額</span>
+        )}
       </div>
     </div>
   );
