@@ -1,6 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "//region": "函式區域請在 Vercel 專案設定的 Functions → Function Region 選 hkg1（香港），不要寫在這個檔案裡：regions 欄位屬於 Pro 方案，Hobby 方案填了會讓整個部署失敗。理由是資料源證交所 MIS、TWSE、櫃買全在台灣，而預設區域 iad1 在美東，每次取價都要橫跨太平洋——實測同一支查詢在美東要 25.5 秒（逾時重試）、在台灣只要 0.02 秒，且十次有四次完全拿不到資料。",
   "functions": {
     "api/*.js": {
       "maxDuration": 60
