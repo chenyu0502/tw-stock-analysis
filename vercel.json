@@ -1,5 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "//regions": "資料源全在台灣（證交所 MIS、TWSE、櫃買），函式預設跑在美東 iad1，每次取價都要橫跨太平洋。實測同樣一支查詢在美東要 25.5 秒（逾時重試），在台灣只要 0.02 秒，而且十次有四次完全拿不到資料。香港是離台灣最近的可用區域。",
+  "regions": ["hkg1"],
   "functions": {
     "api/*.js": {
       "maxDuration": 60

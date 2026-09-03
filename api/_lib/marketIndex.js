@@ -59,8 +59,13 @@ async function loadQuotes() {
     headers: { Referer: 'https://mis.twse.com.tw/stock/index.jsp' },
   });
 
+  // 與個股報價同樣的判斷：沒有 msgArray 就是取用失敗，不是「查無此指數」。
+  if (!Array.isArray(json?.msgArray)) {
+    throw new Error('證交所即時指數暫時取不到');
+  }
+
   const byCode = {};
-  for (const row of json?.msgArray ?? []) {
+  for (const row of json.msgArray) {
     if (!row?.c) continue;
     const prevClose = positiveOrNull(toNumber(row.y));
     const price = positiveOrNull(toNumber(row.z)) ?? prevClose;
@@ -151,7 +156,13 @@ function applyLiveCandle(candles, quote) {
 export async function marketIndexHandler(query, env = {}) {
   const withCandles = String(query.candles ?? '1') !== '0';
 
-  const quotes = await withCache('indexquote', TTL.QUOTE, loadQuotes).catch(() => ({}));
+  // 即時指數失敗不該讓整個端點失敗——日 K 還在，圖照樣畫得出來。
+  // 但要把失敗說出去，否則畫面只會顯示一片空白的指數，看起來像資料算錯。
+  let quoteError = null;
+  const quotes = await withCache('indexquote', TTL.QUOTE, loadQuotes).catch((err) => {
+    quoteError = err?.message ?? '即時指數取用失敗';
+    return {};
+  });
 
   const candlesById = {};
   if (withCandles) {
@@ -188,5 +199,5 @@ export async function marketIndexHandler(query, env = {}) {
     };
   }
 
-  return { status: 200, body: { indices } };
+  return { status: 200, body: { indices, quoteError } };
 }

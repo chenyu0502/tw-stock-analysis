@@ -21,6 +21,7 @@ const ORDER = ['TAIEX', 'TPEX'];
 export default function MarketIndices() {
   const dispatch = useDispatch();
   const indices = useSelector((s) => s.market.indices);
+  const quoteError = useSelector((s) => s.market.indicesQuoteError);
   const [openId, setOpenId] = useState(null);
 
   useEffect(() => {
@@ -35,6 +36,14 @@ export default function MarketIndices() {
 
   return (
     <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+      {/* 指數取不到時明講。少了這一行，畫面只是顯示破折號，
+          看起來像行情沒動或程式壞掉，而不是上游暫時連不上。 */}
+      {quoteError && (
+        <p className="mb-2 rounded border border-amber-900/60 bg-amber-950/30 px-2 py-1.5 text-[11px] text-amber-400">
+          {quoteError}。下方為最近一次成功取得的日 K，指數數值暫時空白。
+        </p>
+      )}
+
       <div className="grid gap-2 sm:grid-cols-2">
         {list.map((index) => (
           <IndexCard

@@ -171,6 +171,16 @@ export async function quoteHandler(query) {
       headers: { Referer: 'https://mis.twse.com.tw/stock/index.jsp' },
     });
 
+    // 上游沒有回傳 msgArray 就是取用失敗，要往上拋。
+    //
+    // 分辨「上游掛了」與「代號不存在」的方法是看 msgArray 在不在：
+    // 代號查無資料時 MIS 仍會回一個空陣列，欄位本身是存在的。
+    // 少了這一關，證交所抽風時端點會回一個沒有任何報價的成功回應，
+    // 前端把它當正常結果，畫面只是靜靜地空著或停在舊價，看不出發生什麼事。
+    if (!Array.isArray(json?.msgArray)) {
+      throw new Error('證交所即時報價暫時取不到，請稍後再試');
+    }
+
     const quotes = {};
     for (const row of json?.msgArray ?? []) {
       const code = row.c;

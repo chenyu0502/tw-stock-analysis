@@ -120,6 +120,8 @@ const initialState = {
   exDividend: {},
   /** 大盤指數，鍵為 TAIEX / TPEX，值含即時報價與日 K。 */
   indices: {},
+  /** 即時指數取用失敗的訊息。日 K 仍可能是好的，因此與 error 分開存。 */
+  indicesQuoteError: null,
   /** 正在請求中的日 K 代號，用於擋掉重複請求。 */
   historyPending: {},
   loading: {
@@ -179,6 +181,9 @@ const marketSlice = createSlice({
       })
       .addCase(loadMarketIndices.fulfilled, (state, action) => {
         state.loading.indices = false;
+        // 日 K 拿到了但即時指數沒拿到，端點仍然算成功。這種半成功要留下訊息，
+        // 否則畫面只會顯示一片空白的指數，看不出是上游取不到。
+        state.indicesQuoteError = action.payload.quoteError ?? null;
         // 只更新報價的那幾次不會帶 K 線，要保留既有的，否則展開中的圖會清空。
         const next = action.payload.indices ?? {};
         for (const [id, value] of Object.entries(next)) {
