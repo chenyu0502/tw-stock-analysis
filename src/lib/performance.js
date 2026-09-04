@@ -109,6 +109,21 @@ export function reconcileShares(transactions, holdings) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * 依即時報價判斷今天是不是交易日。
+ *
+ * MIS 的 tradeDate 是 YYYYMMDD 的成交日期，休市日會停在最後一個交易日。
+ * 拿它當依據，就不需要在前端維護一份台股行事曆，颱風假也不會判斷錯。
+ *
+ * @param {Record<string, object>} quotes
+ * @param {string} todayDate YYYY-MM-DD
+ * @returns {boolean}
+ */
+function quotesAreFromToday(quotes, todayDate) {
+  const compact = todayDate.replace(/-/g, '');
+  return Object.values(quotes ?? {}).some((q) => q?.tradeDate === compact);
+}
+
+/**
  * 建立每日權益曲線。
  *
  * 歷史現金部位由目前現金往回推算，而不是從零累加：
@@ -154,6 +169,27 @@ export function buildEquityCurve({
   }
   const allDates = [...dateSet].sort();
   if (allDates.length === 0) return [];
+
+  // 今天那一列不靠歷史 K 線補上。
+  //
+  // 交易日的區間是各檔歷史 K 線日期的聯集，於是「今天有沒有這一格」
+  // 取決於 Yahoo 有沒有發布當日那根 K 棒——開盤前它還不存在（或收盤價為 null
+  // 而被濾掉），而前端的歷史資料一天只抓一次（見 isHistoryStale）。
+  // 結果是：開盤前開的分頁，月曆今天那格整天空白，重新整理才會出現。
+  //
+  // 但今天的市值本來就一律改用即時報價評價（見下方 liveDate），
+  // 那根 K 棒從頭到尾都用不到。缺的只是「今天這個日期」而已，直接補上。
+  //
+  // 補在對齊交易日之前，今天成交的那幾筆才會落在今天，
+  // 而不是被 `dates.find(d => d >= tx.date)` 推到最後一個歷史交易日——
+  // 那正是先前「昨天那格錯了、今天那格沒顯示」的成因。
+  if (
+    todayDate &&
+    allDates[allDates.length - 1] < todayDate &&
+    quotesAreFromToday(quotes, todayDate)
+  ) {
+    allDates.push(todayDate);
+  }
 
   // 各檔的除息日到每股配息金額。同一天同一檔只會有一筆。
   const divByCode = {};
