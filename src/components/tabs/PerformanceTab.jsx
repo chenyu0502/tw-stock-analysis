@@ -384,14 +384,8 @@ export default function PerformanceTab() {
                   tickFormatter={(v) => `${Math.round(v / 1000)}k`}
                 />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#0f172a',
-                    border: '1px solid #334155',
-                    borderRadius: 8,
-                    fontSize: 14,
-                  }}
-                  labelStyle={{ color: '#94a3b8' }}
-                  formatter={(value) => [money(value), '損益']}
+                  cursor={{ fill: '#1e293b', fillOpacity: 0.5 }}
+                  content={<MonthTooltip />}
                 />
                 {/*
                   關掉進場動畫。各檔歷史股價是逐一載入的，每載入一檔就會重算整條權益曲線，
@@ -538,6 +532,33 @@ export default function PerformanceTab() {
           起算日設為那天，每日損益月曆、月走勢與歷年績效即可自該日完整回推。
         </p>
       </section>
+    </div>
+  );
+}
+
+/**
+ * 月損益走勢的浮動說明。
+ *
+ * 改用自訂內容而不是 recharts 的預設 Tooltip，是因為預設版本會把金額那一行
+ * 染成該系列的顏色，而顏色是取自 `<Bar>` 自己的 fill。這張圖的紅綠是掛在
+ * 每根 `<Cell>` 上的，Bar 本身沒有 fill，於是那一行拿到 rgb(0,0,0)——
+ * 黑字印在 slate-900 的底上，等於整行看不見，只剩月份那一行看得到。
+ *
+ * 自己畫還有一個好處：金額可以依正負套用紅漲綠跌，與月曆和其他數字一致。
+ */
+function MonthTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0].payload;
+
+  return (
+    <div className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-[12px]">
+      <div className="tabular font-medium text-slate-300">{row.month}</div>
+      <div className={`tabular mt-0.5 text-sm font-semibold ${changeColor(row.pnl)}`}>
+        {money(row.pnl)}
+      </div>
+      <div className="tabular mt-0.5 text-slate-500">
+        月底淨值 {money(row.endNetWorth)}
+      </div>
     </div>
   );
 }
