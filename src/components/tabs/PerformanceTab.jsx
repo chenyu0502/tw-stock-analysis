@@ -128,6 +128,28 @@ export default function PerformanceTab() {
     [holdings, history]
   );
 
+  // 歷史股價落後其他標的的持股。
+  //
+  // 有資料但少了最近幾天，比完全沒有資料更難察覺，而且會**把損益在日期之間搬移**：
+  // 缺當日 K 棒的標的會沿用前一日收盤，於是缺的那天少算了它的漲跌，
+  // 下一個有價格的日子再一次補回來。兩天的合計沒錯，逐日數字全錯。
+  //
+  // 實例：3481 的歷史停在 09-03 時，09-04 少 1,200、09-07 多 1,200，
+  // 而「今日各檔損益」用的是即時報價，完全正常——兩個數字對不起來卻毫無線索。
+  // 同一份雲端資料在手機上正確、電腦上不正確，成因就是這個。
+  //
+  // 判斷方式是與「其他標的最新的那一天」相比，不需要台股行事曆。
+  // 停牌的個股也會被列出來，那同樣是使用者該知道的事。
+  const staleHistoryCodes = useMemo(() => {
+    const lastOf = (code) => history[code]?.candles?.at(-1)?.date ?? null;
+    const dates = holdings.map((h) => lastOf(h.code)).filter(Boolean);
+    if (dates.length === 0) return [];
+    const latest = dates.reduce((a, b) => (a > b ? a : b));
+    return holdings
+      .map((h) => ({ code: h.code, last: lastOf(h.code) }))
+      .filter((h) => h.last && h.last < latest);
+  }, [holdings, history]);
+
   const curveMonthly = useMemo(() => aggregateByMonth(curve), [curve]);
   const yearly = useMemo(() => aggregateByYear(curve), [curve]);
   const realized = useMemo(() => realizedSummary(transactions), [transactions]);
@@ -352,6 +374,36 @@ export default function PerformanceTab() {
             這些標的在月曆中沒有每日損益，只有今天以現價計算。
             回到持股頁或分析頁重新載入即可補齊；若持續失敗，多半是上游暫時取不到資料。
           </p>
+        )}
+        {staleHistoryCodes.length > 0 && (
+          <div className="mt-2 rounded-lg border border-amber-900/60 bg-amber-950/30 px-2.5 py-2 text-[12px] leading-relaxed text-amber-400">
+            <p>
+              以下 {staleHistoryCodes.length} 檔的歷史股價落後其他標的，缺的那幾天會沿用最後一筆
+              收盤價。<span className="text-amber-200">當日損益會被挪到下一個有價格的日子</span>，
+              兩天的合計正確、逐日數字不正確。
+            </p>
+            <ul className="tabular mt-1 space-y-0.5">
+              {staleHistoryCodes.slice(0, 12).map((h) => (
+                <li key={h.code}>
+                  {h.code}　只到 {h.last}
+                </li>
+              ))}
+              {staleHistoryCodes.length > 12 && (
+                <li>…另有 {staleHistoryCodes.length - 12} 檔</li>
+              )}
+            </ul>
+            <button
+              type="button"
+              onClick={() =>
+                staleHistoryCodes.forEach((h) =>
+                  dispatch(loadHistory({ code: h.code, range: '2y' }))
+                )
+              }
+              className="mt-1.5 rounded-lg border border-amber-700 px-2 py-1 font-medium text-amber-300 transition hover:bg-amber-900/40"
+            >
+              重新載入這 {staleHistoryCodes.length} 檔
+            </button>
+          </div>
         )}
       </Panel>
 
