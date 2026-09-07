@@ -20,6 +20,28 @@ export function num(value, digits = 2) {
 }
 
 /**
+ * 每股配息金額格式化。
+ *
+ * **不能沿用 num(value, 2)。** ETF 的收益分配常見到小數第三、四位，
+ * 00940 公告的 0.055 會被四捨五入成 0.06，使用者拿去跟公告或券商對帳就對不上；
+ * 而這個欄位存在的目的正是拿來對帳。實際出現過的值包括
+ * 0.055、0.09872、2.031861，兩位小數完全不夠。
+ *
+ * 因此保留上游公告的位數（上限六位）並去掉尾端多餘的零：
+ * 0.055 顯示 0.055、0.12 顯示 0.12、8 顯示 8。
+ *
+ * @param {number|null|undefined} value
+ * @returns {string}
+ */
+export function dividend(value) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  return value.toLocaleString('zh-TW', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 6,
+  });
+}
+
+/**
  * 整數格式化，用於張數與股數。
  * @param {number|null|undefined} value
  * @returns {string}

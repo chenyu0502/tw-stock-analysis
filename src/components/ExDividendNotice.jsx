@@ -1,6 +1,6 @@
 import { CalendarClock } from 'lucide-react';
 import { daysBetween, THRESHOLDS } from '../lib/risks.js';
-import { money, num, int } from '../lib/format.js';
+import { money, dividend, int } from '../lib/format.js';
 
 /**
  * 持股的除權息提醒。
@@ -80,7 +80,7 @@ export default function ExDividendNotice({ holdings, exDividend, today = null })
                 </td>
                 <td className="py-1 text-right text-slate-400">{int(item.shares)}</td>
                 <td className="py-1 text-right text-slate-400">
-                  {Number.isFinite(item.cash) ? num(item.cash, 2) : '待公告'}
+                  {Number.isFinite(item.cash) ? dividend(item.cash) : '待公告'}
                 </td>
                 <td className="py-1 text-right text-slate-300">
                   {item.amount === null ? '—' : money(item.amount)}

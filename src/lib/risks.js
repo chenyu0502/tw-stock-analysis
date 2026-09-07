@@ -11,6 +11,9 @@
  * 「本益比高於自己過去五年的 85% 時間」則是同一檔股票跟自己比，跨標的都成立。
  */
 
+// 配息金額的位數規則只定義一次，這裡與持股頁的除權息表共用，避免兩處顯示不同。
+import { dividend } from './format.js';
+
 /** 嚴重度，用於排序與上色。 */
 export const SEVERITY = { high: 3, medium: 2, low: 1 };
 
@@ -317,7 +320,7 @@ export function describeExDividend(schedule, today = null) {
   const when = days === 0 ? '今日' : `${days} 天後（${schedule.date}）`;
   const parts = [];
   if (Number.isFinite(schedule.cash) && schedule.cash > 0) {
-    parts.push(`每股配息 ${schedule.cash.toFixed(2)} 元`);
+    parts.push(`每股配息 ${dividend(schedule.cash)} 元`);
   }
   if (Number.isFinite(schedule.stock) && schedule.stock > 0) {
     parts.push(`無償配股率 ${schedule.stock.toFixed(4)}`);
