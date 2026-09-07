@@ -91,22 +91,50 @@ export async function fetchWithRetry(url, options = {}) {
 
 /**
  * 取得上游 JSON，失敗時拋出帶有可讀訊息的錯誤。
+ *
+ * **「HTTP 200 但內容不是 JSON」也算失敗，而且要重試。**
+ *
+ * 證交所 MIS 忙碌或重整時會回一個狀態碼 200 的 HTML 錯誤頁。
+ * fetchWithRetry 的重試條件是 5xx 與 429，這種回應完全攔不到——
+ * 解析又發生在重試迴圈之外，於是上游一次抽風就直接變成使用者眼前的錯誤，
+ * 儘管下一次請求通常立刻就成功。實測同一時段連打二十次全部正常，
+ * 代表這類失敗是零星的，重試一次就能吸收掉。
+ *
+ * 第二趟刻意不再重試（retries: 0），整體成本最多就是多打一次上游，
+ * 不會讓一個壞掉的上游把函式的時間預算耗光。
+ *
  * @param {string} url
  * @param {object} [options] 同 fetchWithRetry
  * @returns {Promise<*>}
  */
-export async function fetchJson(url, options) {
-  const res = await fetchWithRetry(url, options);
-  if (!res.ok) {
-    throw new Error(`上游 ${new URL(url).hostname} 回應 ${res.status}`);
+export async function fetchJson(url, options = {}) {
+  const host = new URL(url).hostname;
+  const passes = [options, { ...options, retries: 0 }];
+  let lastError;
+
+  for (let i = 0; i < passes.length; i += 1) {
+    if (i > 0) {
+      // 時間不夠就不要再送，理由同 fetchWithRetry 的 MIN_ATTEMPT_MS。
+      const left = options.deadline == null ? Infinity : options.deadline - Date.now();
+      if (left <= MIN_ATTEMPT_MS) break;
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+
+    const res = await fetchWithRetry(url, passes[i]);
+    // 4xx 重試沒有意義，直接拋出，不進入第二趟。
+    if (!res.ok) {
+      throw new Error(`上游 ${host} 回應 ${res.status}`);
+    }
+    const text = await res.text();
+    if (!text) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      lastError = new Error(`上游 ${host} 暫時無法提供資料（回應不是 JSON），請稍後再試`);
+    }
   }
-  const text = await res.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(`上游 ${new URL(url).hostname} 回傳非 JSON 內容`);
-  }
+
+  throw lastError;
 }
 
 /**
