@@ -654,7 +654,9 @@ export async function historyHandler(query) {
   }
 
   const cacheKey = `history:${code}:${range}:${interval}`;
-  const body = await withCache(cacheKey, TTL.HISTORY, async () => {
+  // withPartialCache 而不是 withCache：官方行情取不到時這份資料是殘缺的，
+  // 只能快取一分鐘等著重試，不能當成好資料鎖住十分鐘。理由見下方 droppedPast。
+  const body = await withPartialCache(cacheKey, TTL.HISTORY, async () => {
     // 只在對照表已經快取時用它決定順序，沒有就直接用預設順序——
     // 為了排順序而去建一次對照表並不划算，理由見 peekMarket。
     const market = peekMarket(code);
@@ -710,7 +712,6 @@ export async function historyHandler(query) {
         let corrected = 0;
         // 今天也校正，但只在官方已經公布時（收盤後）。盤中月報表裡沒有今天那列，
         // official.has 自然為 false，因此不需要另外判斷是否收盤。
-        void todayIso;
         const recent = raw.filter((c) => official.has(c.date));
         recent.forEach((candle) => {
           const row = official.get(candle.date);
@@ -726,6 +727,32 @@ export async function historyHandler(query) {
 
         // 仍為 null 的空列必須濾掉，保留會讓指標計算出錯。
         const candles = raw.filter((c) => c.close !== null);
+
+        // 濾掉的若是「今天以前」的交易日，代表這份資料有洞。
+        //
+        // Yahoo 對台股 ETF 常常給 null 收盤（實測 00915 的 2026-09-07），
+        // 正常情況由上面的官方月報表補上；官方那一趟失敗時就補不了，
+        // 那一天會整根消失。缺一根 K 棒不會有任何錯誤訊息，症狀是
+        // **當日損益被挪到下一個有價格的日子**——缺的那天少算它的漲跌，
+        // 隔天一次補回來。實測五檔 ETF 同時缺 09-07 時，9/07 與 9/08 各差七千多元。
+        //
+        // 因此這種結果必須標成不完整，只快取一分鐘。先前一律當成好資料鎖十分鐘，
+        // 上游一次限流就會讓所有裝置在那十分鐘內都拿到有洞的資料。
+        //
+        // 只算「官方校正涵蓋得到」的那幾個月，而且不算今天。
+        //
+        // 這兩個界線都不能少：
+        //
+        // - **今天那一根不算**：盤前 Yahoo 給 null 是正常的，官方行情也還沒公布，
+        //   算進去會讓開盤前的每一分鐘都在重抓。
+        // - **超出校正窗的不算**：range=2y 時，兩年前那些 Yahoo 缺值本來就補不了，
+        //   重抓一百次還是缺。算進去會讓每一份長區間的歷史都被判為不完整、
+        //   每分鐘重建一次——實測 28 檔持股有 11 檔會中，那正是先前把
+        //   /api/history 打到 504 的請求形狀。
+        const correctableFrom = `${months[months.length - 1]}-01`;
+        const droppedPast = raw.filter(
+          (c) => c.close === null && c.date < todayIso && c.date >= correctableFrom
+        ).length;
 
         // 除權息以證交所與櫃買的官方資料為準，Yahoo 的事件表僅作為補充。
         //
@@ -749,15 +776,20 @@ export async function historyHandler(query) {
           .sort((a, b) => a.date.localeCompare(b.date));
 
         return {
-          code,
-          symbol: `${code}${suffix}`,
-          market: suffix === '.TWO' ? 'OTC' : 'TSE',
-          currency: result.meta?.currency ?? 'TWD',
-          candles,
-          dividends,
-          // 近幾日有幾根 K 棒的收盤價與 Yahoo 不同，已改用官方數字。供除錯對帳用。
-          correctedCloses: corrected,
-          fetchedAt: new Date().toISOString(),
+          value: {
+            code,
+            symbol: `${code}${suffix}`,
+            market: suffix === '.TWO' ? 'OTC' : 'TSE',
+            currency: result.meta?.currency ?? 'TWD',
+            candles,
+            dividends,
+            // 近幾日有幾根 K 棒的收盤價與 Yahoo 不同，已改用官方數字。供除錯對帳用。
+            correctedCloses: corrected,
+            // 這份資料少了幾個過去的交易日。使用端據此知道逐日損益不可信。
+            missingPastDays: droppedPast,
+            fetchedAt: new Date().toISOString(),
+          },
+          complete: droppedPast === 0,
         };
       } catch (err) {
         lastError = err;

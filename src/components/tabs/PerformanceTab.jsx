@@ -34,6 +34,14 @@ import PnlCalendar from '../PnlCalendar.jsx';
 const MONTHS_SHOWN = 18;
 
 /**
+ * 檢查歷史股價缺漏時回溯的交易日數。
+ *
+ * 只看最近這段就夠：更早的缺漏對當期對帳沒有意義，全部列出來反而會把
+ * 真正要處理的那幾天淹掉。二十天涵蓋約一個月，足以對完整個當月月曆。
+ */
+const RECENT_DAYS_CHECKED = 20;
+
+/**
  * 績效頁：損益追蹤與歷年報酬。
  */
 export default function PerformanceTab() {
@@ -128,26 +136,42 @@ export default function PerformanceTab() {
     [holdings, history]
   );
 
-  // 歷史股價落後其他標的的持股。
+  // 歷史股價缺了交易日的持股。
   //
-  // 有資料但少了最近幾天，比完全沒有資料更難察覺，而且會**把損益在日期之間搬移**：
-  // 缺當日 K 棒的標的會沿用前一日收盤，於是缺的那天少算了它的漲跌，
+  // 有資料但缺了幾天，比完全沒有資料更難察覺，而且會**把損益在日期之間搬移**：
+  // 缺 K 棒的那天會沿用前一日收盤，於是那天少算了它的漲跌，
   // 下一個有價格的日子再一次補回來。兩天的合計沒錯，逐日數字全錯。
   //
-  // 實例：3481 的歷史停在 09-03 時，09-04 少 1,200、09-07 多 1,200，
-  // 而「今日各檔損益」用的是即時報價，完全正常——兩個數字對不起來卻毫無線索。
-  // 同一份雲端資料在手機上正確、電腦上不正確，成因就是這個。
+  // 兩種形狀都會發生，而且都實測過：
   //
-  // 判斷方式是與「其他標的最新的那一天」相比，不需要台股行事曆。
-  // 停牌的個股也會被列出來，那同樣是使用者該知道的事。
+  // - **尾端落後**：3481 的歷史停在 09-03 時，09-04 少 1,200、09-07 多 1,200。
+  //   成因是某一台裝置重抓失敗，另一台正常，於是兩台顯示不同數字。
+  // - **中間有洞**：Yahoo 對台股 ETF 常給 null 收盤（實測 00915 的 09-07），
+  //   正常由官方月報表補上，那一趟失敗時整根 K 棒會消失。五檔 ETF 同時缺
+  //   09-07 時，09-07 與 09-08 各差七千多元。這種洞不在尾端，只比對最後一天
+  //   完全看不出來。
+  //
+  // 因此改成比對「其他標的有、這一檔沒有」的交易日，兩種形狀一起涵蓋。
+  // 不需要台股行事曆；只看最近這段，更早的缺漏對當期對帳沒有意義。
+  // 該檔第一根 K 棒之前的日期不算，新上市的標的不該被誤報。
   const staleHistoryCodes = useMemo(() => {
-    const lastOf = (code) => history[code]?.candles?.at(-1)?.date ?? null;
-    const dates = holdings.map((h) => lastOf(h.code)).filter(Boolean);
-    if (dates.length === 0) return [];
-    const latest = dates.reduce((a, b) => (a > b ? a : b));
+    const candlesOf = (code) => history[code]?.candles ?? [];
+    const union = new Set();
+    for (const h of holdings) for (const c of candlesOf(h.code)) union.add(c.date);
+    const recent = [...union].sort().slice(-RECENT_DAYS_CHECKED);
+    if (recent.length === 0) return [];
+
     return holdings
-      .map((h) => ({ code: h.code, last: lastOf(h.code) }))
-      .filter((h) => h.last && h.last < latest);
+      .map((h) => {
+        const candles = candlesOf(h.code);
+        // 完全沒有資料的由 noHistoryCodes 負責，不重複提示。
+        if (candles.length === 0) return null;
+        const own = new Set(candles.map((c) => c.date));
+        const first = candles[0].date;
+        const missing = recent.filter((d) => d >= first && !own.has(d));
+        return missing.length > 0 ? { code: h.code, missing } : null;
+      })
+      .filter(Boolean);
   }, [holdings, history]);
 
   const curveMonthly = useMemo(() => aggregateByMonth(curve), [curve]);
@@ -378,14 +402,15 @@ export default function PerformanceTab() {
         {staleHistoryCodes.length > 0 && (
           <div className="mt-2 rounded-lg border border-amber-900/60 bg-amber-950/30 px-2.5 py-2 text-[12px] leading-relaxed text-amber-400">
             <p>
-              以下 {staleHistoryCodes.length} 檔的歷史股價落後其他標的，缺的那幾天會沿用最後一筆
-              收盤價。<span className="text-amber-200">當日損益會被挪到下一個有價格的日子</span>，
+              以下 {staleHistoryCodes.length} 檔的歷史股價缺了交易日，那幾天會沿用前一筆收盤價。
+              <span className="text-amber-200">當日損益會被挪到下一個有價格的日子</span>，
               兩天的合計正確、逐日數字不正確。
             </p>
             <ul className="tabular mt-1 space-y-0.5">
               {staleHistoryCodes.slice(0, 12).map((h) => (
                 <li key={h.code}>
-                  {h.code}　只到 {h.last}
+                  {h.code}　缺 {h.missing.slice(0, 4).join('、')}
+                  {h.missing.length > 4 && ` 等 ${h.missing.length} 天`}
                 </li>
               ))}
               {staleHistoryCodes.length > 12 && (
