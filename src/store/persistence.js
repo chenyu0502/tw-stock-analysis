@@ -9,7 +9,7 @@
 
 import { hydrate } from './portfolioSlice.js';
 import { mergePortfolio } from './merge.js';
-import { loadPortfolio, savePortfolio } from '../lib/firebase.js';
+import { loadPortfolio, savePortfolio, watchPortfolio } from '../lib/firebase.js';
 
 const STORAGE_KEY = 'tw-stock-portfolio-v1';
 const CLOUD_WRITE_DEBOUNCE_MS = 2000;
@@ -89,6 +89,31 @@ export async function syncFromCloud(store, uid) {
   } catch {
     // 雲端不可用時維持本機資料運作。
   }
+}
+
+/**
+ * 訂閱雲端變更，來了就與本機合併。
+ *
+ * **不會與雲端互相回音。** 兩層擋著：
+ *
+ * 1. 本機自己寫出去時 Firestore 會先回一次「尚未送達伺服器」的樂觀快照，直接略過。
+ * 2. 伺服器確認後還會再回一次。此時合併結果等於本機現況，
+ *    hydrate 出來的 state 與現有的完全相同，middleware 的 lastSerialized
+ *    比對就會直接跳過，不會再寫一次。
+ *
+ * 合併結果與現況不同時（真的是別台改的），hydrate 是 portfolio 動作，
+ * middleware 會照常寫回雲端——這正是把本機獨有資料推上去所需要的行為，
+ * 因此這裡不必自己呼叫 savePortfolio。
+ *
+ * @param {import('@reduxjs/toolkit').Store} store
+ * @param {string} uid
+ * @returns {() => void} 取消訂閱
+ */
+export function subscribeToCloud(store, uid) {
+  return watchPortfolio(uid, (cloud, fromLocalWrite) => {
+    if (fromLocalWrite || !cloud) return;
+    store.dispatch(hydrate(mergePortfolio(store.getState().portfolio, cloud)));
+  });
 }
 
 export { mergePortfolio };

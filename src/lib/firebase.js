@@ -14,7 +14,7 @@ import {
   signOut as fbSignOut,
   onAuthStateChanged,
 } from 'firebase/auth';
-import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 
 const config = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -97,4 +97,29 @@ export async function loadPortfolio(uid) {
 export async function savePortfolio(uid, data) {
   if (!db || !uid) return;
   await setDoc(doc(db, 'portfolios', uid), { ...data, updatedAt: Date.now() }, { merge: true });
+}
+
+/**
+ * 訂閱雲端資料的變更。
+ *
+ * 這是「另一台裝置改了什麼，這台馬上知道」的來源。沒有它，雲端只在開啟
+ * App 的那一刻讀一次，已經開著的分頁會一直停在舊資料，而且畫面上沒有跡象。
+ *
+ * 回呼的第二個參數為 true 代表這份快照是本機自己剛寫出去、尚未送達伺服器的
+ * 樂觀更新。那份內容本來就等於本機現況，套用它沒有意義。
+ *
+ * @param {string} uid
+ * @param {(data: object|null, fromLocalWrite: boolean) => void} onChange
+ * @returns {() => void} 取消訂閱
+ */
+export function watchPortfolio(uid, onChange) {
+  if (!db || !uid) return () => {};
+  return onSnapshot(
+    doc(db, 'portfolios', uid),
+    (snapshot) =>
+      onChange(snapshot.exists() ? snapshot.data() : null, snapshot.metadata.hasPendingWrites),
+    () => {
+      // 監聽失敗（離線、權限、額度）不應讓應用程式停擺，本機資料仍然完整可用。
+    }
+  );
 }

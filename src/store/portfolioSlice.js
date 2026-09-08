@@ -277,6 +277,11 @@ const portfolioSlice = createSlice({
       const totalShares = existing.shares + shares;
       if (totalShares <= 0) {
         // 全數賣出視為出清部位，交易紀錄仍保留供績效計算。
+        //
+        // 這也是一次刪除，必須立墓碑。少了它，另一台裝置雲端那份持股會在
+        // 合併時被當成「本機沒有、雲端有」而加回來，已出清的部位就復活了。
+        // 本 reducer 開頭的 clearDeleted 在這一行之前，因此不會互相抵銷。
+        markDeleted(state, 'holdings', code);
         state.holdings = state.holdings.filter((h) => h.code !== code);
         return;
       }
