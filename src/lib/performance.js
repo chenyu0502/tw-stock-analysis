@@ -131,6 +131,16 @@ function quotesAreFromToday(quotes, todayDate) {
  * 這樣做的理由是使用者填的「帳上現金」是實際餘額，可信度高於由不完整的
  * 交易紀錄累加出來的結果。
  *
+ * **每日損益的定義：當日收盤持股數 × 當日漲跌 ＋ 當日配息。**
+ *
+ * 不含成本、不含手續費，因此與「今日各檔損益」卡片是同一把尺，兩個數字
+ * 在任何一天都會相等——包含當天有成交的日子。實作方式是另外累計一份
+ * cumulativePnlDelta，把當日成交改以前一日收盤價計價；現金與淨值仍用
+ * 真實成交價，不受影響。
+ *
+ * 代價是當日沖銷的價差不會出現在月曆（早上買下午賣，收盤持股為零，
+ * 當天貢獻就是零）。這個工具的使用情境是長期持有，而已實現損益另有專屬區塊。
+ *
  * @param {object} params
  * @param {object[]} params.transactions 已正規化的交易紀錄
  * @param {object[]} params.cashFlows 資金流水
@@ -270,15 +280,19 @@ export function buildEquityCurve({
   const prevDate = foundIndex > 0 ? allDates[foundIndex - 1] : null;
   let openingPositionValue = 0;
   let openingValuationOk = true;
+  // 區間第一天的「前一日價格」，同時也是第一天成交的損益基準。
+  const prevPriceByCode = {};
   for (const code of codes) {
-    const shares = openingShares[code] ?? 0;
-    if (shares === 0) continue;
     // 個股在前一交易日可能沒有報價（停牌或當天無成交），往前找最近一筆收盤價。
     let close;
     for (let i = allDates.indexOf(prevDate); i >= 0; i -= 1) {
       close = closeByCode[code].get(allDates[i]);
       if (close !== undefined) break;
     }
+    if (close !== undefined) prevPriceByCode[code] = close;
+
+    const shares = openingShares[code] ?? 0;
+    if (shares === 0) continue;
     // 期初就持有卻查不到區間之前的價格，代表無從比較，第一天只能維持歸零。
     if (close === undefined) {
       openingValuationOk = false;
@@ -320,6 +334,9 @@ export function buildEquityCurve({
   const rows = [];
   let cumulativeCashDelta = 0;
   let cumulativeDividend = 0;
+  // 損益專用的資金變動量，與上面那個「真實」的分開累計。差別只在當日成交怎麼計價。
+  // 理由見下方 pnlDelta 的說明。
+  let cumulativePnlDelta = 0;
 
   for (const date of dates) {
     // 配息先於當日買賣結算。除息日的領息資格看的是前一交易日收盤的持股，
@@ -330,6 +347,7 @@ export function buildEquityCurve({
       const shares = held[code] ?? 0;
       if (shares <= 0) continue;
       cumulativeCashDelta += shares * amount;
+      cumulativePnlDelta += shares * amount;
       cumulativeDividend += shares * amount;
     }
 
@@ -340,9 +358,27 @@ export function buildEquityCurve({
       // 單筆金額算不出來時以零計，不讓一筆壞資料把整條曲線變成 NaN。
       const delta = tx.shares * tx.price + tx.fee;
       cumulativeCashDelta -= Number.isFinite(delta) ? delta : 0;
+
+      /*
+       * 損益的口徑：**當日成交一律以前一日收盤價計價，且不計手續費。**
+       *
+       * 這樣算出來的每日損益恆等於「當日收盤持股數 × 當日漲跌 ＋ 當日配息」，
+       * 與上方「今日各檔損益」卡片完全同一個口徑，兩個數字不可能對不起來。
+       *
+       * 用真實成交價會把「成交價 → 現價」這段也算進當天：實測 2026-09-08
+       * 買進南電 10 股 @1040.8 與 10 股 @1020.8（前一日收盤 1050），
+       * 月曆那格就比今日損益多出 384 元，使用者只會覺得兩個數字互相矛盾。
+       *
+       * 真實成交價仍然用於 cumulativeCashDelta，因此現金與淨值不受影響，
+       * 只有「損益」這個數字改用同一把尺。手續費與已實現損益另有專屬欄位呈現。
+       */
+      const basis = prevPriceByCode[tx.code];
+      const pnlDelta = tx.shares * (Number.isFinite(basis) ? basis : tx.price);
+      cumulativePnlDelta -= Number.isFinite(pnlDelta) ? pnlDelta : 0;
     }
     const netFlow = flowByDate.get(date) ?? 0;
     cumulativeCashDelta += netFlow;
+    cumulativePnlDelta += netFlow;
 
     /**
      * 當日評價用的價格。
@@ -366,29 +402,43 @@ export function buildEquityCurve({
       positionValue += (held[code] ?? 0) * price;
     }
 
-    rows.push({ date, positionValue, netFlow, cumulativeCashDelta, cumulativeDividend, priceByCode });
+    rows.push({
+      date,
+      positionValue,
+      netFlow,
+      cumulativeCashDelta,
+      cumulativePnlDelta,
+      cumulativeDividend,
+      priceByCode,
+    });
+    // 這一天的收盤價成為下一天成交的計價基準。
+    Object.assign(prevPriceByCode, priceByCode);
   }
 
   // 目前現金對應曲線最後一日，往前每天加回之後發生的資金變動。
   const finalCashDelta = rows[rows.length - 1].cumulativeCashDelta;
+  const finalPnlDelta = rows[rows.length - 1].cumulativePnlDelta;
   let cumulativePnl = 0;
 
   return rows.map((row, i) => {
     const cash = currentCash - (finalCashDelta - row.cumulativeCashDelta);
     const netWorth = cash + row.positionValue;
 
+    // 損益用的淨值：部位市值相同，現金那一段改用「成交以前一日收盤計價」的版本。
+    // 兩者相減之後，當日成交的成本基準就被抵銷掉，只剩下市價的變動。
+    const netWorthForPnl = currentCash - (finalPnlDelta - row.cumulativePnlDelta) + row.positionValue;
+
     let pnl = 0;
     if (i > 0) {
       const prev = rows[i - 1];
       const prevNetWorth =
-        currentCash - (finalCashDelta - prev.cumulativeCashDelta) + prev.positionValue;
-      pnl = netWorth - prevNetWorth - row.netFlow;
+        currentCash - (finalPnlDelta - prev.cumulativePnlDelta) + prev.positionValue;
+      pnl = netWorthForPnl - prevNetWorth - row.netFlow;
     } else if (openingValuationOk) {
       // 第一天比對的是區間前一個交易日：現金變動量尚為零，部位以前一日收盤價計算。
-      // 扣掉當日淨入金後，期初入金不會被算成虧損；當天才建倉的部位也只計入
-      // 成交價到收盤價的價差，不會把入金誤當損益。
-      const prevNetWorth = currentCash - finalCashDelta + openingPositionValue;
-      pnl = netWorth - prevNetWorth - row.netFlow;
+      // 扣掉當日淨入金後，期初入金不會被算成虧損。
+      const prevNetWorth = currentCash - finalPnlDelta + openingPositionValue;
+      pnl = netWorthForPnl - prevNetWorth - row.netFlow;
     }
     cumulativePnl += pnl;
 

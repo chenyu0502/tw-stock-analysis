@@ -389,7 +389,7 @@ export default function PerformanceTab() {
       {/* 每日損益月曆 */}
       <Panel
         title="每日損益月曆"
-        note="以每日收盤淨值變動計算。除息日已把「持股數 × 每股配息」計入，不會出現等於配息的假性虧損"
+        note="每一天都是「當日收盤持股數 × 當日漲跌 ＋ 當日配息」，與上方今日損益同一口徑，不含成本與手續費。除息日已把配息計入，不會出現等於配息的假性虧損"
       >
         <PnlCalendar curve={curve} />
         {noHistoryCodes.length > 0 && (
@@ -437,9 +437,9 @@ export default function PerformanceTab() {
         title={`每月損益走勢（近 ${MONTHS_SHOWN} 個月）`}
         note={
           curveStart
-            ? `以每日淨值變動加總並扣除資金進出。統計自 ${curveStart} 起，` +
+            ? `每日損益加總，與月曆同源。統計自 ${curveStart} 起，` +
               `區間內累計 ${money(latest?.cumulativePnl ?? 0)}`
-            : '以每日淨值變動加總並扣除資金進出'
+            : '每日損益加總，與月曆同源'
         }
       >
         {monthly.length === 0 ? (
