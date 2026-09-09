@@ -19,17 +19,21 @@ const MA_LINES = [
   { period: 20, key: 'ma20', color: '#c084fc', label: '20MA' },
 ];
 
+/** 可切換的顯示天數。由短到長排列，與看盤軟體的慣例一致。 */
+const RANGE_OPTIONS = [5, 10, 30, 60];
+
 /**
- * 顯示的 K 棒數，依螢幕寬度調整。
+ * 未指定時的顯示天數，依螢幕寬度調整。
  *
- * 手機寬度下 60 根 K 棒的實體只剩約兩像素，紅綠幾乎分不出來；
- * 40 根可以拉到三像素以上。桌機寬度則維持 60 根，看得到完整的波段。
+ * 手機寬度下 60 根 K 棒的實體只剩約兩像素，紅綠幾乎分不出來，
+ * 因此預設給 30 根。桌機維持 60 根，看得到完整的波段。
+ * 兩個值都取自 RANGE_OPTIONS，按鈕才有辦法標示出目前是哪一段。
  */
-const BARS = { narrow: 40, wide: 60 };
+const DEFAULT_BARS = { narrow: 30, wide: 60 };
 const NARROW_QUERY = '(max-width: 639px)';
 
-/** 訂閱螢幕寬度，回傳該顯示幾根 K 棒。 */
-function useVisibleBars() {
+/** 訂閱螢幕寬度，回傳預設該顯示幾根 K 棒。 */
+function useDefaultBars() {
   const [narrow, setNarrow] = useState(
     () => typeof window !== 'undefined' && window.matchMedia(NARROW_QUERY).matches
   );
@@ -43,26 +47,33 @@ function useVisibleBars() {
     return () => mq.removeEventListener('change', onChange);
   }, []);
 
-  return narrow ? BARS.narrow : BARS.wide;
+  return narrow ? DEFAULT_BARS.narrow : DEFAULT_BARS.wide;
 }
 
 /**
  * 指數日 K 線圖，疊加 5／10／20 日均線。
  *
  * 這裡畫真正的 K 棒，與個股卡片的收盤線圖不同。個股那邊刻意只畫收盤線，
- * 是因為手機寬度下兩百多根 K 棒會糊成一片；大盤只顯示最近 60 根，
+ * 是因為手機寬度下兩百多根 K 棒會糊成一片；大盤只顯示最近數十根，
  * 每根有足夠寬度，K 棒能表達的開盤與最高最低才有意義。
  *
- * **均線用完整序列計算，只在顯示時截斷。** 若先截成 60 根再算 20 日均線，
- * 畫面最左邊 19 根會沒有均線值，看起來像資料缺漏。
+ * **均線一律用完整序列計算，只在顯示時截斷。** 若先截成 N 根再算 20 日均線，
+ * 畫面最左邊 19 根會沒有均線值，看起來像資料缺漏——切到 5 日或 10 日時
+ * 更是整段都算不出來。截斷放在最後一步，短天期一樣看得到三條均線。
  *
  * recharts 沒有 K 棒圖元。作法是給 Bar 一個 [最低, 最高] 的區間值，
  * 讓它算出這根的像素範圍，再用自訂 shape 在裡面畫影線與實體。
  *
- * @param {{ candles: object[] }} props
+ * 天期由呼叫端保管，因此在加權與櫃買之間切換時不會被重設回預設值——
+ * 想比較兩個指數的同一段期間時，那個重設會讓人每次都要重按一次。
+ *
+ * @param {{ candles: object[], days: number|null, onDaysChange: (days: number) => void }} props
+ *        days 為 null 代表跟隨螢幕寬度
  */
-export default function IndexKChart({ candles }) {
-  const visibleBars = useVisibleBars();
+export default function IndexKChart({ candles, days = null, onDaysChange }) {
+  const defaultBars = useDefaultBars();
+  // 使用者一旦自己選過，轉向就不該再蓋掉他的選擇。
+  const visibleBars = days ?? defaultBars;
 
   const data = useMemo(() => {
     const closes = candles.map((c) => c.close);
@@ -144,15 +155,42 @@ export default function IndexKChart({ candles }) {
         </ResponsiveContainer>
       </div>
 
-      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
         {MA_LINES.map((m) => (
           <span key={m.key} className="flex items-center gap-1">
             <span className="inline-block h-0.5 w-3" style={{ backgroundColor: m.color }} />
             {m.label}
           </span>
         ))}
-        <span className="text-slate-600">近 {data.length} 個交易日</span>
+
+        {/* 天期切換。靠右擺，與左側的均線圖例分開，不會被誤認成圖例的一部分。 */}
+        <span className="ml-auto flex items-center gap-1">
+          {RANGE_OPTIONS.map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => onDaysChange?.(option)}
+              aria-pressed={visibleBars === option}
+              title={`顯示近 ${option} 個交易日`}
+              className={`tabular rounded border px-1.5 py-0.5 transition ${
+                visibleBars === option
+                  ? 'border-sky-500 bg-sky-600 text-white'
+                  : 'border-slate-700 text-sky-400 hover:border-sky-600 hover:text-sky-300'
+              }`}
+            >
+              {option}
+            </button>
+          ))}
+          <span className="text-slate-600">日</span>
+        </span>
       </div>
+
+      {/* 資料不足時要說出來，否則按了 60 卻只畫出 20 根會像是壞掉。 */}
+      {data.length < visibleBars && (
+        <div className="mt-1 text-[11px] text-slate-600">
+          目前只有 {data.length} 個交易日的資料
+        </div>
+      )}
     </div>
   );
 }

@@ -23,6 +23,10 @@ export default function MarketIndices() {
   const indices = useSelector((s) => s.market.indices);
   const quoteError = useSelector((s) => s.market.indicesQuoteError);
   const [openId, setOpenId] = useState(null);
+  // K 線圖的天期由這裡保管，兩個指數共用。放在 IndexKChart 裡面的話，
+  // 切換加權與櫃買會讓圖重新掛載、天期跳回預設值——而想比較兩者的人
+  // 要的正是同一段期間。null 代表跟隨螢幕寬度。
+  const [chartDays, setChartDays] = useState(null);
 
   useEffect(() => {
     dispatch(loadMarketIndices({ withCandles: true }));
@@ -65,7 +69,11 @@ export default function MarketIndices() {
                 指數為證交所即時報價，日 K 收盤後由官方資料校正
               </span>
             </div>
-            <IndexKChart candles={index.candles ?? []} />
+            <IndexKChart
+              candles={index.candles ?? []}
+              days={chartDays}
+              onDaysChange={setChartDays}
+            />
           </div>
         ) : null
       )}
