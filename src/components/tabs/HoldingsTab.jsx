@@ -39,6 +39,14 @@ import RiskScan from '../RiskScan.jsx';
 const CONCENTRATION_THRESHOLD = 30;
 
 /**
+ * 資金流水預設顯示的筆數。
+ *
+ * 流水只增不減，全部攤開會一路把下面的持股推出畫面。平常要看的只有剛記的
+ * 那幾筆（確認有沒有記對），其餘收合，要對帳時再展開。
+ */
+const FLOWS_SHOWN = 3;
+
+/**
  * 持股頁：部位管理與損益總覽。
  */
 export default function HoldingsTab() {
@@ -52,7 +60,19 @@ export default function HoldingsTab() {
 
   const [form, setForm] = useState({ code: '', shares: '', price: '', date: today() });
   const [flowAmount, setFlowAmount] = useState('');
+  // 資金進出的日期。原本沒有這個欄位、一律記成今天，於是補記一筆過去的入金
+  // （或誤刪後想還原）時，那筆會落在錯的日子上，歷史現金整段偏掉。
+  const [flowDate, setFlowDate] = useState(today());
+  const [showAllFlows, setShowAllFlows] = useState(false);
   const [message, setMessage] = useState('');
+
+  // 新的在前。只算一次，收合與展開共用。
+  const sortedFlows = useMemo(
+    () => [...cashFlows].sort((a, b) => String(b.date).localeCompare(String(a.date))),
+    [cashFlows]
+  );
+  const visibleFlows = showAllFlows ? sortedFlows : sortedFlows.slice(0, FLOWS_SHOWN);
+  const netFlow = useMemo(() => cashFlows.reduce((acc, f) => acc + f.amount, 0), [cashFlows]);
 
   const codesKey = holdings.map((h) => h.code).join(',');
 
@@ -185,9 +205,27 @@ export default function HoldingsTab() {
       setMessage('入金金額需為非零數字，出金請填負數');
       return;
     }
-    dispatch(recordCashFlow({ amount }));
+    dispatch(recordCashFlow({ amount, date: flowDate || today() }));
     setFlowAmount('');
+    // 日期跳回今天：補記過去那一筆之後，下一筆最常見的仍是今天，
+    // 留著舊日期很容易讓下一筆也被誤記到過去。
+    setFlowDate(today());
     setMessage('');
+  }
+
+  /**
+   * 刪除一筆資金流水，先確認。
+   *
+   * 刪除不只是把一列拿掉——帳上現金會同步反向調整。先前按一下垃圾桶就立刻
+   * 生效，實際發生過誤刪 5,249 的入金，現金也跟著少了這個數。
+   */
+  function handleRemoveFlow(flow) {
+    const direction = flow.amount > 0 ? '減少' : '增加';
+    const ok = window.confirm(
+      `刪除 ${flow.date} 這筆 ${money(flow.amount)}？\n\n` +
+        `帳上現金會同步${direction} ${money(Math.abs(flow.amount))}。`
+    );
+    if (ok) dispatch(removeCashFlow(flow.id));
   }
 
   return (
@@ -223,6 +261,15 @@ export default function HoldingsTab() {
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <input
+            type="date"
+            value={flowDate}
+            // 未來的入金還沒發生，擋掉可以避免手滑選到明年。
+            max={today()}
+            onChange={(e) => setFlowDate(e.target.value)}
+            title="入金或出金的日期"
+            className="tabular rounded border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm text-slate-300"
+          />
+          <input
             type="number"
             value={flowAmount}
             onChange={(e) => setFlowAmount(e.target.value)}
@@ -247,30 +294,46 @@ export default function HoldingsTab() {
           差額請填在交易的手續費欄。
         </p>
 
-        {cashFlows.length > 0 && (
+        {sortedFlows.length > 0 && (
           <div className="mt-2 border-t border-slate-800 pt-2">
-            <div className="mb-1 text-[12px] text-slate-500">資金流水</div>
+            {/* 收合時也看得到總數與淨入金，不必展開就知道流水大致的樣子。 */}
+            <div className="mb-1 flex items-baseline gap-2 text-[12px] text-slate-500">
+              <span>資金流水</span>
+              <span className="tabular text-slate-600">
+                共 {sortedFlows.length} 筆，淨入金{' '}
+                <span className={changeColor(netFlow)}>{money(netFlow)}</span>
+              </span>
+            </div>
             <ul className="space-y-0.5">
-              {[...cashFlows]
-                .sort((a, b) => String(b.date).localeCompare(String(a.date)))
-                .map((flow) => (
-                  <li key={flow.id} className="flex items-center gap-2 text-[12px]">
-                    <span className="tabular w-20 shrink-0 text-slate-400">{flow.date}</span>
-                    <span className={`tabular w-24 shrink-0 text-right ${changeColor(flow.amount)}`}>
-                      {money(flow.amount)}
-                    </span>
-                    {flow.note && <span className="min-w-0 truncate text-slate-600">{flow.note}</span>}
-                    <button
-                      type="button"
-                      onClick={() => dispatch(removeCashFlow(flow.id))}
-                      title="刪除這筆"
-                      className="ml-auto shrink-0 rounded p-1 text-slate-600 transition hover:bg-rose-500/10 hover:text-rose-500"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </li>
-                ))}
+              {visibleFlows.map((flow) => (
+                <li key={flow.id} className="flex items-center gap-2 text-[12px]">
+                  <span className="tabular w-20 shrink-0 text-slate-400">{flow.date}</span>
+                  <span className={`tabular w-24 shrink-0 text-right ${changeColor(flow.amount)}`}>
+                    {money(flow.amount)}
+                  </span>
+                  {flow.note && <span className="min-w-0 truncate text-slate-600">{flow.note}</span>}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveFlow(flow)}
+                    title="刪除這筆（帳上現金會同步調整）"
+                    className="ml-auto shrink-0 rounded p-1 text-slate-600 transition hover:bg-rose-500/10 hover:text-rose-500"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </li>
+              ))}
             </ul>
+            {sortedFlows.length > FLOWS_SHOWN && (
+              <button
+                type="button"
+                onClick={() => setShowAllFlows((v) => !v)}
+                className="mt-1 text-[12px] text-sky-400 transition hover:text-sky-300"
+              >
+                {showAllFlows
+                  ? '收合'
+                  : `顯示全部 ${sortedFlows.length} 筆（另有 ${sortedFlows.length - FLOWS_SHOWN} 筆）`}
+              </button>
+            )}
           </div>
         )}
       </div>
