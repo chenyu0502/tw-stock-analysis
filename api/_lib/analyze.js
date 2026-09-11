@@ -494,6 +494,21 @@ function describeError(err) {
       '上方的估值分位、獲利結構與風險提示不受影響，那些是程式計算的。'
     );
   }
+  // 地區限制。這一條必須排在金鑰檢查之前：它同樣是 4xx，但原因完全不同，
+  // 誤判成「金鑰無效」會讓人去重設一把本來就正確的金鑰。
+  //
+  // Gemini 以**發出請求的來源 IP** 判定地區，判定的不是使用者在哪裡，
+  // 而是那支函式跑在哪裡。因此這個錯誤幾乎都是執行環境變了（Vercel 的函式區域、
+  // 本機掛了 VPN 或代理），而不是設定被改壞。
+  if (/location is not supported|FAILED_PRECONDITION/i.test(message)) {
+    return (
+      'Gemini 拒絕了這個地區的請求（User location is not supported）。' +
+      '地區是依發出請求的來源 IP 判定，也就是這支 API 函式實際執行的位置，不是你人在哪裡。' +
+      '正式站請確認 Vercel 專案的函式執行區域仍在 Google 支援的地區（原本為美東 iad1）；' +
+      '本機開發請確認沒有掛到不支援地區的 VPN 或代理。' +
+      '上方的估值分位、同業比較、獲利結構與風險提示不受影響，那些是程式計算的。'
+    );
+  }
   if (/API key|API_KEY_INVALID|401|403|PERMISSION/i.test(message)) {
     return 'Gemini 金鑰無效或權限不足，請確認 GEMINI_API_KEY 設定正確。';
   }

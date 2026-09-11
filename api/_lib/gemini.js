@@ -67,6 +67,18 @@ function isModelUnavailable(message) {
   return /no longer available|not found|is not supported/i.test(message);
 }
 
+/**
+ * 判斷錯誤是否為地區限制（User location is not supported）。
+ *
+ * **這一條必須先於 isModelUnavailable 判定。** 那個樣式含有「is not supported」，
+ * 會把地區限制誤認成「這個模型不可用」，於是整條備援鏈四個模型逐一重試——
+ * 但地區是依來源 IP 判定的，對每個模型都一樣，四次注定全部失敗，
+ * 只是讓使用者多等好幾秒才看到同一個錯誤。
+ */
+function isLocationBlocked(message) {
+  return /location is not supported/i.test(message);
+}
+
 /** 判斷錯誤是否為配額用盡。免費層按模型分別計算，換一個模型就有機會成功。 */
 function isQuotaExhausted(message) {
   return /429|quota|RESOURCE_EXHAUSTED/i.test(message);
@@ -119,6 +131,8 @@ export async function generateJson(params) {
       return { data: await callModel(model, { ...params, deadline }), model };
     } catch (err) {
       lastError = err;
+      // 地區限制對整個 API 生效，換模型不會有不同結果，立刻往上拋。
+      if (isLocationBlocked(err.message)) throw err;
       // 模型不可用、配額用盡、逾時或忙碌都值得換一個模型試試。
       // 其餘錯誤（金鑰無效、請求格式錯誤）換幾個模型都是一樣的結果，
       // 硬換只會拖長使用者等待的時間，還把真正的原因藏在最後一個模型的訊息裡。
