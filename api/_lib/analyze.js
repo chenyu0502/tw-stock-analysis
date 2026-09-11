@@ -504,7 +504,8 @@ function describeError(err) {
     return (
       'Gemini 拒絕了這個地區的請求（User location is not supported）。' +
       '地區是依發出請求的來源 IP 判定，也就是這支 API 函式實際執行的位置，不是你人在哪裡。' +
-      '正式站請確認 Vercel 專案的函式執行區域仍在 Google 支援的地區（原本為美東 iad1）；' +
+      '正式站請確認 Vercel 專案的函式執行區域仍在 Google 服務的地區（目前採用東京 hnd1，' +
+      '香港 hkg1 已實測不可用）；' +
       '本機開發請確認沒有掛到不支援地區的 VPN 或代理。' +
       '上方的估值分位、同業比較、獲利結構與風險提示不受影響，那些是程式計算的。'
     );
