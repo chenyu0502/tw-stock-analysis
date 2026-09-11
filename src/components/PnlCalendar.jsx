@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { dailyPnlOfMonth } from '../lib/performance.js';
 import { money, changeColor } from '../lib/format.js';
@@ -107,78 +107,84 @@ export default function PnlCalendar({ curve }) {
         </button>
       </div>
 
-      <div className="flex gap-1">
-        <div className="grid flex-1 grid-cols-7 gap-1">
-          {WEEKDAYS.map((w) => (
-            <div key={w} className="pb-1 text-center text-[11px] text-slate-600">
-              {w}
-            </div>
-          ))}
+      {/*
+        日期與週損益放在同一個格線裡：七欄日期加一欄週損益。
 
-          {cells.map((cell, i) => {
-            if (!cell) return <div key={`blank-${i}`} />;
-            const hasData = cell.pnl !== null;
-            const key = `day-${cell.date}`;
-            return (
-              <button
-                key={cell.date}
-                type="button"
-                disabled={!hasData}
-                onClick={() => pick(key, cell.date, cell.pnl)}
-                // 格子只顯示到千位，對帳時需要完整金額。
-                // 桌機滑鼠停留看 title，手機沒有 hover，改點一下顯示在下方那一行。
-                title={hasData ? `${cell.date}　${money(cell.pnl)}` : undefined}
-                // 左右內距收窄：字級放大一級之後，375px 寬的手機上「+114k」這種
-                // 五個字元的金額會擠出格子。上下維持原本的間距。
-                className={`rounded border px-0.5 py-1 text-center ${
-                  hasData ? 'border-slate-800 bg-slate-900/60' : 'border-transparent'
-                } ${selected?.key === key ? 'ring-1 ring-sky-500' : ''}`}
-              >
-                <div className="tabular text-[11px] text-slate-500">{cell.day}</div>
-                {hasData && (
-                  <div className={`tabular text-[11px] leading-tight ${changeColor(cell.pnl)}`}>
-                    {Math.abs(cell.pnl) >= 1000
-                      ? `${cell.pnl > 0 ? '+' : '-'}${Math.round(Math.abs(cell.pnl) / 1000)}k`
-                      : Math.round(cell.pnl)}
-                  </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
+        先前是兩個並排的獨立格線，各自依內容算列高——日期格有日期與金額兩行，
+        週欄只有一行，於是週欄從第一列就往下偏了 20px，之後逐列縮小。
+        兩邊只有在列高剛好相同時才會對齊，沒有任何機制保證這件事。
+        同一個格線裡，同一列的所有格子共用同一個上下緣，不可能錯開。
+      */}
+      <div className="grid grid-cols-[repeat(7,minmax(0,1fr))_3.5rem] gap-1">
+        {WEEKDAYS.map((w) => (
+          <div key={w} className="pb-1 text-center text-[11px] text-slate-600">
+            {w}
+          </div>
+        ))}
+        <div className="pb-1 text-center text-[11px] text-slate-600">週</div>
 
-        {/* 週損益欄，與月曆各列對齊 */}
-        <div className="grid w-14 grid-rows-[auto] gap-1">
-          <div className="pb-1 text-center text-[11px] text-slate-600">週</div>
-          {weekTotals.map((week, i) => {
-            const key = `week-${i}`;
-            return (
-              <button
-                key={key}
-                type="button"
-                disabled={!week}
-                onClick={() =>
-                  pick(key, `${week.from} ～ ${week.to}（${week.days} 個交易日）`, week.total)
-                }
-                // 與日期格一致：格子只顯示到千位，對帳時需要完整金額。
-                title={
-                  week
-                    ? `${week.from} ～ ${week.to}　${money(week.total)}（${week.days} 個交易日）`
-                    : undefined
-                }
-                className={`tabular flex items-center justify-center rounded border border-slate-800/60 text-[11px] ${changeColor(
-                  week?.total ?? null
-                )} ${selected?.key === key ? 'ring-1 ring-sky-500' : ''}`}
-              >
-                {week === null
-                  ? ''
-                  : Math.abs(week.total) >= 1000
-                    ? `${week.total > 0 ? '+' : '-'}${Math.round(Math.abs(week.total) / 1000)}k`
-                    : Math.round(week.total)}
-              </button>
-            );
-          })}
-        </div>
+        {weekTotals.map((week, row) => (
+          <Fragment key={`row-${row}`}>
+            {cells.slice(row * 7, row * 7 + 7).map((cell, col) => {
+              if (!cell) return <div key={`blank-${row}-${col}`} />;
+              const hasData = cell.pnl !== null;
+              const key = `day-${cell.date}`;
+              return (
+                <button
+                  key={cell.date}
+                  type="button"
+                  disabled={!hasData}
+                  onClick={() => pick(key, cell.date, cell.pnl)}
+                  // 格子只顯示到千位，對帳時需要完整金額。
+                  // 桌機滑鼠停留看 title，手機沒有 hover，改點一下顯示在下方那一行。
+                  title={hasData ? `${cell.date}　${money(cell.pnl)}` : undefined}
+                  // 左右內距收窄：字級放大一級之後，375px 寬的手機上「+114k」這種
+                  // 五個字元的金額會擠出格子。上下維持原本的間距。
+                  className={`rounded border px-0.5 py-1 text-center ${
+                    hasData ? 'border-slate-800 bg-slate-900/60' : 'border-transparent'
+                  } ${selected?.key === key ? 'ring-1 ring-sky-500' : ''}`}
+                >
+                  <div className="tabular text-[11px] text-slate-500">{cell.day}</div>
+                  {hasData && (
+                    <div className={`tabular text-[11px] leading-tight ${changeColor(cell.pnl)}`}>
+                      {Math.abs(cell.pnl) >= 1000
+                        ? `${cell.pnl > 0 ? '+' : '-'}${Math.round(Math.abs(cell.pnl) / 1000)}k`
+                        : Math.round(cell.pnl)}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+
+            {/* 這一週的損益，與左邊七格同一列 */}
+            <button
+              type="button"
+              disabled={!week}
+              onClick={() =>
+                pick(
+                  `week-${row}`,
+                  `${week.from} ～ ${week.to}（${week.days} 個交易日）`,
+                  week.total
+                )
+              }
+              // 與日期格一致：格子只顯示到千位，對帳時需要完整金額。
+              title={
+                week
+                  ? `${week.from} ～ ${week.to}　${money(week.total)}（${week.days} 個交易日）`
+                  : undefined
+              }
+              className={`tabular flex items-center justify-center rounded border border-slate-800/60 text-[11px] ${changeColor(
+                week?.total ?? null
+              )} ${selected?.key === `week-${row}` ? 'ring-1 ring-sky-500' : ''}`}
+            >
+              {week === null
+                ? ''
+                : Math.abs(week.total) >= 1000
+                  ? `${week.total > 0 ? '+' : '-'}${Math.round(Math.abs(week.total) / 1000)}k`
+                  : Math.round(week.total)}
+            </button>
+          </Fragment>
+        ))}
       </div>
 
       {/*
