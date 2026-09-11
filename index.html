@@ -6,6 +6,57 @@
     <meta name="description" content="台股投資組合分析與健康度檢視工具" />
     <meta name="theme-color" content="#0f172a" />
     <title>台股分析</title>
+    <!--
+      部署後舊頁面的自動復原。
+
+      每次部署都會換掉程式檔的檔名（內容雜湊），舊檔名從此不存在。
+      手機常把分頁留在記憶體裡，回到分頁時沿用的是舊頁面，它要的舊檔名
+      已經拿不到，整個 App 起不來——使用者看到的就是「連不上線」，
+      只有把分頁完全關掉重開才會好。實際發生於 2026-09-11。
+
+      這段必須是一般的 script、而且放在 App 程式之前：它要處理的正是
+      「App 程式本身載入失敗」的情況，放在 App 裡面就永遠跑不到。
+
+      只重新載入一次（六十秒內不重複），避免真的是網路問題時陷入無限重整。
+    -->
+    <script>
+      (function () {
+        var KEY = 'stale-asset-reload-at';
+        var WINDOW_MS = 60 * 1000;
+
+        function reloadOnce() {
+          try {
+            var last = Number(sessionStorage.getItem(KEY)) || 0;
+            if (Date.now() - last < WINDOW_MS) return;
+            sessionStorage.setItem(KEY, String(Date.now()));
+          } catch (e) {
+            // 無痕模式等情況下 sessionStorage 不可用，寧可不重整也不要冒無限迴圈的風險。
+            return;
+          }
+          location.reload();
+        }
+
+        // 資源載入錯誤不會冒泡，要在捕獲階段攔。只管 /assets/ 底下的檔案，
+        // 其他資源（例如圖片）載入失敗與版本無關。
+        window.addEventListener(
+          'error',
+          function (event) {
+            var el = event.target;
+            if (!el || (el.tagName !== 'SCRIPT' && el.tagName !== 'LINK')) return;
+            var url = el.src || el.href || '';
+            if (url.indexOf('/assets/') !== -1) reloadOnce();
+          },
+          true
+        );
+
+        // 已經在跑的舊版 App 延後載入某個模組（例如匯出 Excel 用的 xlsx）時，
+        // 那個舊檔名同樣不存在。Vite 會在這種情況發出這個事件。
+        window.addEventListener('vite:preloadError', function (event) {
+          event.preventDefault();
+          reloadOnce();
+        });
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

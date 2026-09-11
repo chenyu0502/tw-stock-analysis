@@ -7,7 +7,7 @@
   },
   "rewrites": [
     {
-      "source": "/((?!api/|version.json).*)",
+      "source": "/((?!api/|assets/|version.json).*)",
       "destination": "/index.html"
     }
   ]
