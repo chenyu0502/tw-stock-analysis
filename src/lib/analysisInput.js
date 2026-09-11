@@ -25,6 +25,7 @@ const RECENT_WINDOW = 20;
  * @param {object[]} [params.chipSeries] 法人買賣超歷史序列，中線判斷需要
  * @param {object} [params.margin] 融資融券
  * @param {object} [params.fundamentals] /api/fundamentals 的結果，供估值解讀
+ * @param {object} [params.peers] /api/peers 的結果，供同業估值比較
  * @param {object[]} [params.risks] detectRisks() 的結果，供風險綜述
  * @returns {object|null} 資料不足時回傳 null
  */
@@ -39,6 +40,7 @@ export function buildAnalysisInput({
   chipSeries,
   margin,
   fundamentals,
+  peers,
   risks,
 }) {
   if (!candles || candles.length < 60) return null;
@@ -116,6 +118,7 @@ export function buildAnalysisInput({
         }
       : null,
     fundamentals: buildFundamentalSummary(fundamentals),
+    peers: buildPeerSummary(peers),
     // 風險由 detectRisks() 依固定門檻算出，模型只負責串成敘述，不得自行新增項目。
     risks: Array.isArray(risks)
       ? risks.map((r) => ({ category: r.category, severity: r.severity, message: r.message }))
@@ -158,6 +161,57 @@ function buildFundamentalSummary(f) {
         }
       : null,
   };
+}
+
+/**
+ * 壓縮同業比較資料。
+ *
+ * 只留統計量與少數幾檔同業明細。完整回應含最多十一檔鄰近同業的三項指標，
+ * 全部送進提示詞會膨脹 token，也讓模型多出一堆可以拿來自行運算的數字——
+ * 中位數與分位已經算好了，模型的工作是解讀，不是重算。
+ *
+ * @param {object|null} p
+ * @returns {object|null}
+ */
+function buildPeerSummary(p) {
+  if (!p?.available) return null;
+
+  const metric = (m) =>
+    m
+      ? {
+          self: m.self,
+          median: m.median,
+          p25: m.p25,
+          p75: m.p75,
+          percentile: m.percentile,
+          rank: m.rank,
+          samples: m.samples,
+        }
+      : null;
+
+  return {
+    industry: p.industry,
+    peerCount: p.peerCount,
+    // 樣本不足時仍然送出，但要讓模型知道，否則它會拿三家公司的中位數當產業水準。
+    sufficient: p.sufficient,
+    pe: metric(p.metrics?.pe),
+    pb: metric(p.metrics?.pb),
+    dividendYield: metric(p.metrics?.dividendYield),
+    // 鄰近同業只取本檔上下各兩檔，足夠讓敘述舉得出實例，又不會灌爆提示詞。
+    neighbors: pickAround(p.neighbors ?? [], 2),
+  };
+}
+
+/**
+ * 取出本檔（self 為 true）上下各 span 檔。
+ * @param {object[]} rows
+ * @param {number} span
+ * @returns {object[]}
+ */
+function pickAround(rows, span) {
+  const index = rows.findIndex((r) => r.self);
+  if (index < 0) return rows.slice(0, span * 2 + 1);
+  return rows.slice(Math.max(0, index - span), index + span + 1);
 }
 
 /**

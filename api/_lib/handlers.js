@@ -34,6 +34,7 @@ import { withCache, withPartialCache, cacheGet, TTL } from './cache.js';
 import { analyzeHandler } from './analyze.js';
 import { fundamentalsHandler } from './fundamentals.js';
 import { marketIndexHandler } from './marketIndex.js';
+import { buildPeerReport, loadIndustryMap } from './peers.js';
 
 const TWSE_OPENAPI = 'https://openapi.twse.com.tw/v1';
 const TWSE_RWD = 'https://www.twse.com.tw/rwd/zh';
@@ -1131,18 +1132,19 @@ async function institutionalHistory(code, days, token) {
 /* ------------------------------------------------------------------ */
 
 /**
- * GET /api/valuation?codes=2330,6488
+ * 全市場的本益比、股價淨值比與殖利率快照。
  *
  * 上市取證交所 BWIBBU_ALL，上櫃取櫃買中心 peratio_analysis，
  * 兩者皆免費且免 token，比參考站另接第三方服務穩定。
+ *
+ * 抽成獨立函式是為了讓同業比較重用同一份快取。兩個端點各抓一次全市場清單，
+ * 拿到的會是同一份資料，卻要付兩趟跨太平洋的往返，還可能因為抓取時間不同
+ * 而讓「本檔估值」與「同業中位數」落在不同的交易日。
+ *
+ * @returns {Promise<Record<string, object>>}
  */
-export async function valuationHandler(query) {
-  const codes = String(query.codes ?? '')
-    .split(',')
-    .map((c) => c.trim())
-    .filter(Boolean);
-
-  const all = await withPartialCache('valuation:all', TTL.DAILY, async () => {
+async function loadValuationAll() {
+  return withPartialCache('valuation:all', TTL.DAILY, async () => {
     const map = {};
     let listedOk = false;
     let otcOk = false;
@@ -1189,9 +1191,67 @@ export async function valuationHandler(query) {
 
     return { value: map, complete: listedOk && otcOk };
   });
+}
 
+/**
+ * GET /api/valuation?codes=2330,6488
+ *
+ * 上市取證交所 BWIBBU_ALL，上櫃取櫃買中心 peratio_analysis，
+ * 兩者皆免費且免 token，比參考站另接第三方服務穩定。
+ */
+export async function valuationHandler(query) {
+  const codes = String(query.codes ?? '')
+    .split(',')
+    .map((c) => c.trim())
+    .filter(Boolean);
+
+  const all = await loadValuationAll();
   const picked = codes.length ? Object.fromEntries(codes.map((c) => [c, all[c] ?? null])) : all;
   return { status: 200, body: { items: picked, fetchedAt: new Date().toISOString() } };
+}
+
+/* ------------------------------------------------------------------ */
+/* 端點：同業估值比較                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * GET /api/peers?code=2330
+ *
+ * 回傳同產業的本益比、股價淨值比與殖利率統計，以及本檔在其中的分位與名次。
+ * 全部由程式計算，不呼叫任何語言模型。
+ *
+ * 產業分類需要 FINMIND_TOKEN；估值數字重用 /api/valuation 的全市場快取，
+ * 因此熱快取時這個端點不會產生任何上游流量。
+ */
+export async function peersHandler(query, env = {}) {
+  const code = String(query.code ?? '').trim();
+  if (!/^\d{4,6}[A-Z]?$/.test(code)) {
+    return { status: 400, body: { error: '代號格式不正確' } };
+  }
+  if (!env.FINMIND_TOKEN) {
+    return {
+      status: 200,
+      body: {
+        available: false,
+        code,
+        reason: '伺服器未設定 FINMIND_TOKEN，無法取得產業分類',
+      },
+    };
+  }
+
+  // 兩份資料互不相依，並行取用。
+  const [industries, valuations] = await Promise.all([
+    loadIndustryMap(env.FINMIND_TOKEN),
+    loadValuationAll(),
+  ]);
+
+  return {
+    status: 200,
+    body: {
+      ...buildPeerReport({ code, industries, valuations }),
+      fetchedAt: new Date().toISOString(),
+    },
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1205,6 +1265,7 @@ export const routes = {
   margin: marginHandler,
   institutional: institutionalHandler,
   valuation: valuationHandler,
+  peers: peersHandler,
   fundamentals: fundamentalsHandler,
   exdividend: exDividendHandler,
   universe: universeHandler,

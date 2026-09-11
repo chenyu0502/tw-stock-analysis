@@ -96,6 +96,17 @@ export function fetchFundamentals(code) {
 }
 
 /**
+ * 取得同業估值比較：同產業的本益比、股價淨值比、殖利率統計與本檔在其中的位置。
+ *
+ * 與 fetchFundamentals 的分位帶互補：那個回答「相對自己過去貴不貴」，
+ * 這個回答「相對同業貴不貴」。同樣由伺服器以程式計算，不經過語言模型。
+ * @param {string} code
+ */
+export function fetchPeers(code) {
+  return callApi('peers', { code });
+}
+
+/**
  * 取得即將除權息的標的清單（全市場，已公告的區間約往後兩個月）。
  * 單次請求涵蓋所有代號，由前端自行比對持股。
  */

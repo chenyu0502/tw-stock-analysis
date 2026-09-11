@@ -68,6 +68,12 @@ export const loadFundamentals = createAsyncThunk(
   }
 );
 
+/** 載入單檔的同業估值比較。產業分類伺服器快取 24 小時，前端只在未載入時取用。 */
+export const loadPeers = createAsyncThunk('market/loadPeers', async ({ code }) => {
+  const data = await api.fetchPeers(code);
+  return { code, data };
+});
+
 /**
  * 載入即將除權息的清單。
  *
@@ -113,6 +119,8 @@ const initialState = {
   valuation: {},
   /** 各檔的基本面深度指標，鍵為代號，值為 { available, bands, revenue, income, ... } */
   fundamentals: {},
+  /** 各檔的同業估值比較，鍵為代號，值為 { available, industry, metrics, neighbors, reason } */
+  peers: {},
   /**
    * 即將除權息的標的，鍵為代號，值為該檔最近一次的 { date, cash, stock, kind }。
    * 同一檔在公告區間內可能有多筆（月配 ETF），只留最近的那一次。
@@ -130,6 +138,7 @@ const initialState = {
     daily: false,
     chips: false,
     fundamentals: false,
+    peers: false,
     indices: false,
   },
   error: null,
@@ -221,6 +230,23 @@ const marketSlice = createSlice({
         // 基本面屬於加值資訊，取不到時記錄於該檔自身，
         // 不寫進全域 error，避免蓋掉更重要的報價錯誤訊息。
         state.fundamentals[action.meta.arg.code] = {
+          available: false,
+          reason: action.error.message,
+        };
+      })
+
+      .addCase(loadPeers.pending, (state) => {
+        state.loading.peers = true;
+      })
+      .addCase(loadPeers.fulfilled, (state, action) => {
+        state.loading.peers = false;
+        state.peers[action.payload.code] = action.payload.data;
+      })
+      .addCase(loadPeers.rejected, (state, action) => {
+        state.loading.peers = false;
+        // 同業比較屬於加值資訊，取不到時記錄於該檔自身，
+        // 不寫進全域 error，避免蓋掉更重要的報價錯誤訊息。
+        state.peers[action.meta.arg.code] = {
           available: false,
           reason: action.error.message,
         };

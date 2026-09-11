@@ -28,20 +28,34 @@ const SYSTEM_INSTRUCTION = `你是一位台股技術分析師，服務對象是�
 6. 判斷各週期立場時，請分別依據對應的資料：
    短線看 KD、MACD、5 日乖離、量能比與最近的支撐壓力距離；
    中線看 20 與 60 日均線關係、型態、法人近 5 日與近 20 日買賣超、融資融券；
-   長線看 120 日均線方向、現價在期間區間中的位置、估值分位與獲利品質。
+   長線看 120 日均線方向、現價在期間區間中的位置、估值分位（自身歷史與同業兩軸）
+   與獲利品質。
    對應資料缺漏時，直接說明資料不足，不要用其他週期的資料硬推。
 7. 估值判斷的規則：
-   分位、每股盈餘、利潤率、營收年增、股東權益報酬率等數字全部由使用者提供，
-   **你不可以自行計算、推估或修改任何數字**，需要提到時只能原樣引用。
-   估值等級描述的是「相對於這檔自己的歷史區間」，不是買賣建議。
-   請說明估值水位與獲利表現之間的關係——高分位若有獲利成長支撐，
+   分位、中位數、名次、每股盈餘、利潤率、營收年增、股東權益報酬率等數字
+   全部由使用者提供，**你不可以自行計算、推估或修改任何數字**，
+   需要提到時只能原樣引用。估值等級不是買賣建議。
+   估值要分成兩個獨立的座標軸判斷，不可混為一談：
+   （一）縱向，相對這檔自己的歷史區間，依據為【估值與基本面】的分位。
+   （二）橫向，相對同產業其他公司，依據為【同業比較】的中位數、分位與名次。
+   兩軸可能給出相反的訊號，那本身就是重要資訊：歷史分位高但同業分位低，
+   代表整個產業一起重評價；歷史分位低但同業分位高，代表這檔相對同業並不便宜，
+   只是自己曾經更貴。遇到這種情形必須明講，不可只取其中一邊。
+   綜合等級要同時考慮兩軸與獲利表現——高分位若有獲利成長支撐，
    與高分位卻伴隨獲利衰退，意義完全不同。
-   沒有提供估值資料時（例如 ETF），等級一律填「資料不足」並說明原因。
-8. 風險綜述只能引用「已偵測風險」區塊中提供的項目，
+   沒有提供估值資料時（例如 ETF），對應的等級填「資料不足」並說明原因。
+8. 同業比較的規則：
+   產業分類、同業家數、中位數、四分位與名次全部由使用者提供，
+   **不可自行加入未列出的公司，也不可自行判斷誰是同業**。
+   產業分類是粗分類，同一分類內的公司可能規模、產品線、毛利結構差異極大
+   （例如控股公司與單一產品廠），因此橫向比較的結論必須說明這個限制。
+   標示同業家數不足時，不得用那組中位數下結論，只能說樣本太少無法比較。
+   沒有提供同業資料時，橫向等級填「資料不足」並說明原因。
+9. 風險綜述只能引用「已偵測風險」區塊中提供的項目，
    **不得自行新增未列出的風險**。請說明這些項目之間的關聯，
    以及其中哪一項最需要注意、理由是什麼。沒有提供任何項目時，
    說明目前未觸發門檻，並提醒這不等於沒有風險。
-9. 禁止使用 emoji。`;
+10. 禁止使用 emoji。`;
 
 /**
  * 單一時間週期的立場定義。
@@ -57,6 +71,24 @@ const TIMEFRAME_SCHEMA = {
     watch: { type: 'string', description: '關鍵觀察條件，需引用提供的價位或指標數值，四十字以內' },
   },
   required: ['stance', 'basis', 'watch'],
+};
+
+/**
+ * 單一估值座標軸的定義。
+ *
+ * 縱向（相對自己歷史）與橫向（相對同業）共用同一個形狀，介面才能並排呈現，
+ * 兩軸訊號相反時一眼就看得出來——那正是最值得注意的情況。
+ */
+const AXIS_SCHEMA = {
+  type: 'object',
+  properties: {
+    level: { type: 'string', enum: ['偏高', '中性', '偏低', '資料不足'] },
+    note: {
+      type: 'string',
+      description: '依據，須引用提供的分位、中位數或名次，六十字以內',
+    },
+  },
+  required: ['level', 'note'],
 };
 
 /** Gemini 的結構化輸出定義。用 responseSchema 保證格式，不靠提示詞約束。 */
@@ -109,17 +141,32 @@ const RESPONSE_SCHEMA = {
     },
     valuation: {
       type: 'object',
-      description: '估值解讀。等級描述相對於自己歷史區間的水位，不是買賣建議。',
+      description:
+        '估值解讀。分成「相對自己歷史」與「相對同業」兩個座標軸，再給綜合等級。皆非買賣建議。',
       properties: {
-        level: { type: 'string', enum: ['偏高', '中性', '偏低', '資料不足'] },
+        level: {
+          type: 'string',
+          enum: ['偏高', '中性', '偏低', '資料不足'],
+          description: '綜合兩個座標軸與獲利表現後的等級',
+        },
+        vsHistory: { ...AXIS_SCHEMA, description: '相對這檔自己的歷史估值區間' },
+        vsPeers: { ...AXIS_SCHEMA, description: '相對同產業其他公司' },
+        drivers: {
+          type: 'array',
+          description:
+            '撐住或壓抑目前估值的具體因素，兩到四項。每項須引用提供的獲利、成長或' +
+            '同業數字，並說明它是往上撐還是往下壓。不可引用未提供的數字。',
+          items: { type: 'string' },
+        },
         basis: {
           type: 'string',
           description:
-            '依據，須引用提供的分位與獲利數字，並說明估值水位與獲利表現的關係，八十字以內',
+            '綜合等級的依據，須說明兩個座標軸的訊號一致還是相反，以及為何得出這個綜合結論，' +
+            '一百字以內',
         },
         watch: { type: 'string', description: '什麼情況下這個判斷會改變，四十字以內' },
       },
-      required: ['level', 'basis', 'watch'],
+      required: ['level', 'vsHistory', 'vsPeers', 'drivers', 'basis', 'watch'],
     },
     riskSummary: {
       type: 'string',
@@ -166,8 +213,19 @@ function fmt(value) {
  * @returns {string}
  */
 function buildPrompt(input) {
-  const { code, name, price, levels, indicators, recent, valuation, chips, fundamentals, risks } =
-    input;
+  const {
+    code,
+    name,
+    price,
+    levels,
+    indicators,
+    recent,
+    valuation,
+    chips,
+    fundamentals,
+    peers,
+    risks,
+  } = input;
 
   const levelLines = [
     ...levels.resistances.map(
@@ -213,6 +271,8 @@ ATR(14)：${fmt(indicators.atr)}
 
 ${buildValuationBlock(valuation, fundamentals)}
 
+${buildPeerBlock(peers)}
+
 ${buildChipBlock(chips)}
 
 ${buildRiskBlock(risks)}
@@ -221,11 +281,14 @@ ${buildRiskBlock(risks)}
 1. 判斷目前的價格型態。
 2. 解讀每個支撐壓力價位的意義。
 3. 分別給出短線、中線、長線的技術面立場，各自說明依據與觀察條件。
-4. 判斷估值水位，並說明它與獲利表現之間的關係。
+4. 估值判讀，依序完成三件事：
+   先判斷相對自己歷史區間的水位，再判斷相對同業的水位，
+   最後說明兩者一致還是相反，並給出綜合等級與支撐或壓抑估值的具體因素。
 5. 把已偵測風險串成一段綜述，指出哪一項最需要注意。
 
 再次提醒：只能引用上方提供的數字，不可自行產生或計算任何數字。
-估值等級是相對自己歷史區間的描述，風險綜述只能引用已列出的項目。
+兩個估值座標軸要分開判斷，不可用其中一邊的數字去解釋另一邊。
+風險綜述只能引用已列出的項目。
 所有結論都不得包含買賣指令、目標價或停損價。`;
 }
 
@@ -262,7 +325,8 @@ function buildValuationBlock(valuation, fundamentals) {
   };
 
   const lines = [
-    '【估值與基本面】分位為「目前值高於過去多少比例的交易日」',
+    '【估值與基本面】縱向座標，與這檔自己的過去比較。' +
+      '分位為「目前值高於過去多少比例的交易日」',
     band('本益比', fundamentals.pe, ' 倍'),
     band('股價淨值比', fundamentals.pb, ' 倍'),
     band('現金殖利率', fundamentals.dividendYield, '%'),
@@ -292,6 +356,66 @@ function buildValuationBlock(valuation, fundamentals) {
         (Number.isFinite(d.payoutRatio) ? `，配發率 ${fmt(d.payoutRatio)}%` : '')
     );
   }
+  return lines.join('\n');
+}
+
+/**
+ * 同業比較區塊。
+ *
+ * 這一段補的是估值分位帶看不到的東西。歷史分位只能回答「這檔相對自己貴不貴」，
+ * 整個產業一起重評價時，個股的歷史分位會長期停在高檔，看起來永遠很貴；
+ * 產業結構性衰退時則反過來，看起來永遠便宜。加上橫向座標才分得出
+ * 「這檔貴」與「這個產業貴」。
+ *
+ * 家數不足時照樣把數字送出去，但明寫出來，否則模型會拿三家公司的中位數
+ * 當成產業水準下結論。
+ *
+ * @param {object|null} peers 壓縮後的同業比較
+ * @returns {string}
+ */
+function buildPeerBlock(peers) {
+  if (!peers) {
+    return '【同業比較】無資料（相對同業的等級請填「資料不足」並說明原因）';
+  }
+
+  const metric = (label, m, unit = '') => {
+    if (!m) return `${label}：無資料`;
+    const self = Number.isFinite(m.self) ? `${fmt(m.self)}${unit}` : '無（本檔無此數值）';
+    const position = Number.isFinite(m.percentile)
+      ? `，位於同業 ${fmt(m.percentile)}% 分位，由低至高第 ${m.rank} 名`
+      : '';
+    return (
+      `${label}：本檔 ${self}，同業中位數 ${fmt(m.median)}${unit}` +
+      `（第一四分位 ${fmt(m.p25)}${unit}，第三四分位 ${fmt(m.p75)}${unit}，` +
+      `樣本 ${m.samples} 家）${position}`
+    );
+  };
+
+  const lines = [
+    `【同業比較】產業分類：${peers.industry}，同產業取得估值者共 ${peers.peerCount} 家`,
+    peers.sufficient
+      ? '分位為「本檔數值高於同業中多少比例的家數」。本益比與股價淨值比的分位越高代表越貴，殖利率相反。'
+      : '**同業家數過少，這組統計不具代表性，不得據此下橫向結論**，只能說明樣本不足。',
+    metric('本益比', peers.pe, ' 倍'),
+    metric('股價淨值比', peers.pb, ' 倍'),
+    metric('現金殖利率', peers.dividendYield, '%'),
+  ];
+
+  if (Array.isArray(peers.neighbors) && peers.neighbors.length > 0) {
+    lines.push(
+      '本益比相鄰的同業（★ 為本檔）：',
+      ...peers.neighbors.map(
+        (n) =>
+          `${n.self ? '★ ' : '  '}${n.code} ${n.name}：` +
+          `本益比 ${fmt(n.pe)}，股價淨值比 ${fmt(n.pb)}，殖利率 ${fmt(n.dividendYield)}%`
+      )
+    );
+  }
+
+  lines.push(
+    '註：產業分類為粗分類，同一分類內的公司規模與產品結構可能差異極大，' +
+      '橫向比較的結論必須說明這個限制。'
+  );
   return lines.join('\n');
 }
 

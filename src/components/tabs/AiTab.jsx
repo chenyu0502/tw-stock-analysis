@@ -7,6 +7,7 @@ import {
   loadDailyStats,
   loadInstitutionalHistory,
   loadFundamentals,
+  loadPeers,
   loadExDividend,
   isHistoryStale,
 } from '../../store/marketSlice.js';
@@ -17,6 +18,7 @@ import { DEFAULT_MA } from '../../store/portfolioSlice.js';
 import { num, pct, int } from '../../lib/format.js';
 import LevelLadder from '../LevelLadder.jsx';
 import ValuationBands from '../ValuationBands.jsx';
+import PeerComparison from '../PeerComparison.jsx';
 
 /**
  * AI 頁：型態分析與支撐壓力區間推估。
@@ -34,6 +36,7 @@ export default function AiTab() {
   const chipHistoryMap = useSelector((s) => s.market.institutionalHistory);
   const fundamentalsMap = useSelector((s) => s.market.fundamentals);
   const loadingFundamentals = useSelector((s) => s.market.loading.fundamentals);
+  const peersMap = useSelector((s) => s.market.peers);
   const exDividendMap = useSelector((s) => s.market.exDividend);
 
   // 分析頁與持股頁的標的合併成一份清單，同一檔只出現一次。
@@ -94,7 +97,9 @@ export default function AiTab() {
     if (!chipHistoryMap[code]) dispatch(loadInstitutionalHistory({ code, days: 30 }));
     // 基本面一檔要打五個 FinMind 資料集，伺服器快取一天，前端也只在未載入時取用。
     if (!fundamentalsMap[code]) dispatch(loadFundamentals({ code }));
-  }, [code, history, chipHistoryMap, fundamentalsMap, dispatch]);
+    // 同業比較共用估值與產業分類兩份全市場快取，第二檔起不會再打上游。
+    if (!peersMap[code]) dispatch(loadPeers({ code }));
+  }, [code, history, chipHistoryMap, fundamentalsMap, peersMap, dispatch]);
 
   // 切換標的時清掉上一檔的結果，避免看到別檔的分析卻以為是這檔的。
   useEffect(() => {
@@ -119,6 +124,9 @@ export default function AiTab() {
       // 基本面在這裡就壓縮成模型需要的欄位，不把整包回應（含四分位、
       // 十二個月營收序列、六年股利明細）送進提示詞。
       fundamentals: fundamentalsMap[code],
+      // 同業比較同樣先壓縮。估值判斷需要縱向（自己的歷史）與橫向（同業）兩個座標，
+      // 少了橫向那一軸，模型分不出「這檔貴」與「這個產業貴」。
+      peers: peersMap[code],
     });
   }, [
     selected,
@@ -130,9 +138,11 @@ export default function AiTab() {
     chipHistoryMap,
     marginMap,
     fundamentalsMap,
+    peersMap,
   ]);
 
   const fundamentals = fundamentalsMap[code] ?? null;
+  const peers = peersMap[code] ?? null;
 
   // 規則型風險清單。純計算，不呼叫 AI，因此不需要按任何按鈕就能顯示。
   const risks = useMemo(
@@ -259,6 +269,15 @@ export default function AiTab() {
         )}
       </Panel>
 
+      {/* 同業比較。與上方的估值分位互補：那個是縱向（跟自己的過去比），
+          這個是橫向（跟同產業比）。同樣純計算，不依賴模型。 */}
+      <Panel
+        title="同業估值比較"
+        note="以同產業其他公司為基準的橫向對照。與上方的估值分位互補：一個看自己的歷史，一個看同業。全部由程式計算，不經過 AI。"
+      >
+        <PeerComparison data={peers} />
+      </Panel>
+
       {fundamentals?.available && <FundamentalStats data={fundamentals} />}
 
       <Panel
@@ -324,23 +343,9 @@ export default function AiTab() {
           {analysis.valuation && (
             <Panel
               title="估值解讀"
-              note="等級描述的是相對於這檔自己歷史區間的水位，不是買賣建議。數字全部取自上方的估值分位，模型不產生任何數值。"
+              note="分成「相對自己歷史」與「相對同業」兩個座標軸，再給綜合等級。等級不是買賣建議，數字全部取自上方兩個面板，模型不產生任何數值。"
             >
-              <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
-                <span
-                  className={`rounded border px-2 py-0.5 text-xs ${
-                    VALUATION_STYLE[analysis.valuation.level] ?? VALUATION_STYLE['資料不足']
-                  }`}
-                >
-                  {analysis.valuation.level}
-                </span>
-                <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
-                  {analysis.valuation.basis}
-                </p>
-                <p className="mt-1 text-xs leading-relaxed text-sky-400/80">
-                  觀察：{analysis.valuation.watch}
-                </p>
-              </div>
+              <ValuationVerdict data={analysis.valuation} />
             </Panel>
           )}
 
@@ -400,6 +405,89 @@ const VALUATION_STYLE = {
   偏低: 'border-sky-500/40 bg-sky-500/10 text-sky-400',
   資料不足: 'border-slate-700/50 bg-slate-800/40 text-slate-500',
 };
+
+/**
+ * 估值解讀。
+ *
+ * 兩個座標軸並排呈現：縱向是跟自己的歷史比，橫向是跟同業比。並排是刻意的——
+ * 兩軸給出相反訊號時那件事本身就是結論，摺在一段敘述裡會被讀過去。
+ */
+function ValuationVerdict({ data }) {
+  const history = data.vsHistory;
+  const peers = data.vsPeers;
+
+  // 訊號分歧由程式判斷，不依賴模型是否記得提。只有兩邊都有明確方向且相反時才算，
+  // 「中性」與「資料不足」不構成分歧。
+  const opposite =
+    (history?.level === '偏高' && peers?.level === '偏低') ||
+    (history?.level === '偏低' && peers?.level === '偏高');
+
+  return (
+    <div className="space-y-2">
+      <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-slate-200">綜合</span>
+          <span
+            className={`rounded border px-2 py-0.5 text-xs ${
+              VALUATION_STYLE[data.level] ?? VALUATION_STYLE['資料不足']
+            }`}
+          >
+            {data.level}
+          </span>
+        </div>
+        <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{data.basis}</p>
+        <p className="mt-1 text-xs leading-relaxed text-sky-400/80">觀察：{data.watch}</p>
+      </div>
+
+      {(history || peers) && (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <AxisCard label="相對自己歷史" hint="跟這檔過去五年比" data={history} />
+          <AxisCard label="相對同業" hint="跟同產業其他公司比" data={peers} />
+        </div>
+      )}
+
+      {opposite && (
+        <div className="rounded-lg border border-amber-800/60 bg-amber-950/30 p-2.5 text-xs leading-relaxed text-amber-300">
+          兩個座標軸的訊號相反。這通常代表整個產業一起重評價，或這檔與同業的
+          獲利結構落差已大到不宜直接比較，單看其中一邊都會得到偏頗的結論。
+        </div>
+      )}
+
+      {Array.isArray(data.drivers) && data.drivers.length > 0 && (
+        <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
+          <div className="text-[12px] text-slate-500">撐住或壓抑估值的因素</div>
+          <ul className="mt-1 space-y-1">
+            {data.drivers.map((item) => (
+              <li key={item} className="text-xs leading-relaxed text-slate-300">
+                · {item}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AxisCard({ label, hint, data }) {
+  if (!data) return null;
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-slate-400">{label}</span>
+        <span className="text-[11px] text-slate-600">{hint}</span>
+        <span
+          className={`rounded border px-2 py-0.5 text-xs ${
+            VALUATION_STYLE[data.level] ?? VALUATION_STYLE['資料不足']
+          }`}
+        >
+          {data.level}
+        </span>
+      </div>
+      <p className="mt-1.5 text-xs leading-relaxed text-slate-400">{data.note}</p>
+    </div>
+  );
+}
 
 /** 風險嚴重度的顏色。沿用警示慣例，與台股漲跌色無關。 */
 const SEVERITY_COLOR = {
