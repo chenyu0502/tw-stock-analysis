@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { CandlestickChart } from 'lucide-react';
 import { loadMarketIndices } from '../store/marketSlice.js';
+import { useMarketPolling } from '../lib/useMarketPolling.js';
 import { num, pct, changeColor } from '../lib/format.js';
 import IndexKChart from './IndexKChart.jsx';
 
@@ -30,10 +31,12 @@ export default function MarketIndices() {
 
   useEffect(() => {
     dispatch(loadMarketIndices({ withCandles: true }));
-    // 之後只更新報價。日 K 一天只會多一根，每分鐘重抓一年份是白費頻寬。
-    const timer = setInterval(() => dispatch(loadMarketIndices({ withCandles: false })), REFRESH_MS);
-    return () => clearInterval(timer);
   }, [dispatch]);
+
+  // 之後只更新報價。日 K 一天只會多一根，每分鐘重抓一年份是白費頻寬。
+  // 前景與交易時段的閘門由 useMarketPolling 負責——這一條原本是裸用的
+  // setInterval，分頁整晚不關就是每天約 1,440 次打在不會變動的收盤指數上。
+  useMarketPolling(() => dispatch(loadMarketIndices({ withCandles: false })), REFRESH_MS);
 
   const list = ORDER.map((id) => indices[id]).filter(Boolean);
   if (list.length === 0) return null;

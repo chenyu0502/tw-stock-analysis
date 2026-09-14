@@ -4,6 +4,7 @@ import { Plus } from 'lucide-react';
 import MarketIndices from '../MarketIndices.jsx';
 import { addWatch, removeWatch, updateWatch } from '../../store/portfolioSlice.js';
 import { loadQuotes, loadDailyStats } from '../../store/marketSlice.js';
+import { useMarketPolling } from '../../lib/useMarketPolling.js';
 import StockCard from '../StockCard.jsx';
 
 /** 報價自動更新間隔。台股盤中每 30 秒更新一次已足夠，過於頻繁只是浪費上游額度。 */
@@ -21,15 +22,20 @@ export default function AnalysisTab() {
   const codes = watchlist.map((w) => w.code);
   const codesKey = codes.join(',');
 
-  // 清單異動時重新取價，並在盤中定時更新。
+  // 清單異動時重新取價。這一次不設條件：開頁時就算是半夜，
+  // 也該把最後一次收盤的數字顯示出來。
   useEffect(() => {
-    if (!codesKey) return undefined;
+    if (!codesKey) return;
     const list = codesKey.split(',');
     dispatch(loadQuotes(list));
     dispatch(loadDailyStats(list));
-    const timer = setInterval(() => dispatch(loadQuotes(list)), QUOTE_REFRESH_MS);
-    return () => clearInterval(timer);
   }, [codesKey, dispatch]);
+
+  // 後續的定時更新才需要閘門。原本是裸用的 setInterval，分頁整晚不關就是
+  // 每天約 2,880 次請求，其中絕大多數打的是收盤後不會再變的數字。
+  useMarketPolling(() => {
+    if (codesKey) dispatch(loadQuotes(codesKey.split(',')));
+  }, QUOTE_REFRESH_MS);
 
   function handleAdd(e) {
     e.preventDefault();

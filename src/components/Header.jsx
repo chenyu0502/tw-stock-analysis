@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useSelector, useDispatch, useStore } from 'react-redux';
 import { LogIn, LogOut, RefreshCw } from 'lucide-react';
 import { signInWithGoogle, signOut, isFirebaseConfigured } from '../lib/firebase.js';
 import { setAuthError } from '../store/authSlice.js';
 import { loadQuotes, loadDailyStats } from '../store/marketSlice.js';
 import { syncFromCloud } from '../store/persistence.js';
-import { isMarketDataWindow } from '../lib/marketHours.js';
+import { useMarketPolling } from '../lib/useMarketPolling.js';
 
 /** 自動重新整理的間隔。 */
 const AUTO_REFRESH_MS = 5 * 60 * 1000;
@@ -69,42 +69,16 @@ export default function Header() {
   }
 
   /**
-   * 每五分鐘自動重抓一次。
+   * 每五分鐘自動重抓一次，前景與交易時段的閘門由 useMarketPolling 負責。
    *
-   * 三個刻意的限制：
+   * Header 一直掛載，因此四個分頁都受益——原本只有分析頁自己有輪詢，
+   * 開著持股頁看市值，數字可以一整天不動。
    *
-   * 1. **不做雲端同步。** main.jsx 已經以 onSnapshot 訂閱雲端，變更本來就會即時推送，
-   *    自動路徑再抓一次只是多付 Firestore 讀取，換不到任何新資料。
-   *    手動按鈕保留同步，那是使用者明確要求「把所有東西弄到最新」的動作。
-   * 2. **分頁在背景時跳過。** 手機把分頁放著不管是常態，背景分頁持續打上游
-   *    既耗電也耗流量，而使用者根本看不到結果。
-   * 3. **非交易時段跳過。** 收盤後數字不會再變，整晚每五分鐘一次就是上百次
-   *    無謂請求。判定見 isMarketDataWindow。
-   *
-   * 回到前景時補一次，但要距上次更新超過一個間隔才做——否則在分頁之間來回切換
-   * 會變成每切一次就打一次上游。
+   * **自動路徑刻意不做雲端同步。** main.jsx 已經以 onSnapshot 訂閱雲端，
+   * 變更本來就會即時推送，再抓一次只是多付 Firestore 讀取，換不到任何新資料。
+   * 手動按鈕保留同步，那是使用者明確要求「把所有東西弄到最新」的動作。
    */
-  useEffect(() => {
-    const tick = () => {
-      if (document.visibilityState !== 'visible') return;
-      if (!isMarketDataWindow()) return;
-      refreshMarketData();
-    };
-
-    const timer = setInterval(tick, AUTO_REFRESH_MS);
-
-    const onVisible = () => {
-      const last = store.getState().market.lastQuoteAt;
-      if (last && Date.now() - last < AUTO_REFRESH_MS) return;
-      tick();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, [refreshMarketData, store]);
+  useMarketPolling(refreshMarketData, AUTO_REFRESH_MS);
 
   return (
     <header className="sticky top-0 z-20 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
