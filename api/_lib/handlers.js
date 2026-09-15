@@ -408,7 +408,71 @@ async function loadExRights() {
 }
 
 /**
- * GET /api/exdividend
+ * 把上游的日期字串正規化為 YYYY-MM-DD，取不到有效日期時回傳 null。
+ *
+ * FinMind 的日期欄位在資料尚未公告時可能是空字串或 0000-00-00，
+ * 直接當成日期用會在介面上顯示出一個不存在的日子。
+ *
+ * @param {*} value
+ * @returns {string|null}
+ */
+function normalizeIsoDate(value) {
+  const text = String(value ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || text.startsWith('0000')) return null;
+  return text;
+}
+
+/**
+ * 取得單檔的「除息日 → 現金股利發放日」對照。
+ *
+ * 為什麼要另外查一次：證交所的除權除息預告表與櫃買的除權息預告都只給除息日，
+ * 沒有發放日——那兩張表的用途是除息當天的參考價計算，不是股利撥付。
+ * 發放日要到 FinMind 的 TaiwanStockDividend 才有。
+ *
+ * **以除息日為鍵，不是取最近一筆。** 月配 ETF 一年有十二次配息，
+ * 取最近一筆會把上一次的發放日安到這一次頭上，而那個日期看起來完全合理，
+ * 錯了也不會有人發現。
+ *
+ * 股利政策一年只變動幾次，快取一天即可，TTL 設短只是消耗 FinMind 的每小時額度。
+ *
+ * @param {string} code
+ * @param {string} token
+ * @returns {Promise<Record<string, string>>}
+ */
+async function loadPaymentDates(code, token) {
+  return withCache(`dividend:payment:${code}`, TTL.FUNDAMENTAL, async () => {
+    const start = new Date(Date.now() - 730 * 86400 * 1000).toISOString().slice(0, 10);
+    const url =
+      `${FINMIND}?dataset=TaiwanStockDividend` +
+      `&data_id=${encodeURIComponent(code)}&start_date=${start}`;
+    const json = await fetchJson(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      timeoutMs: 8000,
+      retries: 0,
+    });
+
+    const map = {};
+    for (const row of json?.data ?? []) {
+      // 鍵名以樣式比對取得。這兩個欄位的兄弟欄位（CashEarningsDistribution 等）
+      // 專案已在用，但鍵名仍以比對取值，與 handlers.js 其餘部分的慣例一致。
+      const exDate = normalizeIsoDate(pickKey(row, /^CashExDividendTradingDate$/i));
+      const payDate = normalizeIsoDate(pickKey(row, /^CashDividendPaymentDate$/i));
+      if (exDate && payDate) map[exDate] = payDate;
+    }
+    return map;
+  });
+}
+
+/**
+ * 一次請求最多查幾檔的發放日。
+ *
+ * 實際查詢數遠低於此：只查「在使用者清單中，而且確實有即將除息」的那幾檔，
+ * 一般是零到五檔。這個上限只是擋掉異常的大量請求。
+ */
+const PAYMENT_LOOKUP_LIMIT = 30;
+
+/**
+ * GET /api/exdividend[?codes=2330,0056]
  *
  * 即將除權息的標的。來源為證交所的除權除息預告表與櫃買的除權息預告，
  * 兩者都只涵蓋已公告的區間（實測約往後兩個月）。
@@ -419,8 +483,12 @@ async function loadExRights() {
  * 配息金額可能尚未定案。證交所在該欄位放的是「待公告實際收益分配金額」這串文字
  * （而且帶 HTML 標籤），此時金額回傳 null，由介面顯示「金額待公告」，
  * 不可當成零——那會讓使用者以為這次不配息。
+ *
+ * 帶入 codes 時，會對其中確實即將除息的那幾檔補上現金股利發放日（需 FINMIND_TOKEN）。
+ * 全市場清單本身不分代號、共用同一份快取，發放日是在那之後才併上去的，
+ * 因此不同的 codes 不會各自重建一份全市場清單。
  */
-export async function exDividendHandler() {
+export async function exDividendHandler(query = {}, env = {}) {
   const today = new Date().toISOString().slice(0, 10);
 
   const body = await withPartialCache('exdividend:upcoming', TTL.DAILY, async () => {
@@ -480,7 +548,44 @@ export async function exDividendHandler() {
     };
   });
 
-  return { status: 200, body };
+  const codes = new Set(
+    String(query.codes ?? '')
+      .split(',')
+      .map((c) => c.trim())
+      .filter(Boolean)
+      .slice(0, PAYMENT_LOOKUP_LIMIT)
+  );
+  if (codes.size === 0 || !env.FINMIND_TOKEN) return { status: 200, body };
+
+  // 只查「在清單中，而且確實有即將除息」的那幾檔。持有二十幾檔時，
+  // 同一個月真正要除息的通常只有幾檔，對全部持股查是白費額度。
+  const targets = [...new Set(body.items.filter((i) => codes.has(i.code)).map((i) => i.code))];
+  if (targets.length === 0) return { status: 200, body };
+
+  const entries = await Promise.all(
+    targets.map(async (code) => {
+      try {
+        return [code, await loadPaymentDates(code, env.FINMIND_TOKEN)];
+      } catch {
+        // 發放日是加值資訊。取不到就留白讓介面顯示「待公告」，
+        // 不能讓它把整份除息提醒一起拖垮。
+        return [code, {}];
+      }
+    })
+  );
+  const byCode = Object.fromEntries(entries);
+
+  // 一律產生新物件，不改動快取中的那份——那份會被後續所有請求共用。
+  return {
+    status: 200,
+    body: {
+      ...body,
+      items: body.items.map((item) => ({
+        ...item,
+        payDate: byCode[item.code]?.[item.date] ?? null,
+      })),
+    },
+  };
 }
 
 /**

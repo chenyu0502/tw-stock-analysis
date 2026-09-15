@@ -85,8 +85,8 @@ export default function AiTab() {
     const list = allCodesKey.split(',');
     dispatch(loadQuotes(list));
     dispatch(loadDailyStats(list));
-    // 除權息預告是全市場一次取回，不分代號，因此放在這裡只會呼叫一次。
-    dispatch(loadExDividend());
+    // 除權息預告是全市場一次取回，因此放在這裡只會呼叫一次。
+    dispatch(loadExDividend(list));
   }, [allCodesKey, dispatch]);
 
   // 歷史 K 線與法人序列的資料量大，只對目前選中的標的載入。

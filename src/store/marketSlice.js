@@ -77,11 +77,14 @@ export const loadPeers = createAsyncThunk('market/loadPeers', async ({ code }) =
 /**
  * 載入即將除權息的清單。
  *
- * 全市場只需一次請求，因此不帶參數也不分代號快取，
- * 由使用端自行比對自己關心的標的。
+ * 全市場只需一次請求，由使用端自行比對自己關心的標的。
+ * 帶入代號時伺服器會對其中即將除息的那幾檔補上現金股利發放日——
+ * 發放日不在預告表裡，得另外查 FinMind，因此只對需要的代號查。
+ *
+ * @param {string[]} [codes]
  */
-export const loadExDividend = createAsyncThunk('market/loadExDividend', async () =>
-  api.fetchExDividend()
+export const loadExDividend = createAsyncThunk('market/loadExDividend', async (codes = []) =>
+  api.fetchExDividend(codes)
 );
 
 /**

@@ -59,6 +59,7 @@ export default function ExDividendNotice({ holdings, exDividend, today = null })
           <thead>
             <tr className="text-slate-500">
               <th className="pb-1 text-left font-normal">除息日</th>
+              <th className="pb-1 text-left font-normal">發放日</th>
               <th className="pb-1 text-left font-normal">標的</th>
               <th className="pb-1 text-right font-normal">股數</th>
               <th className="pb-1 text-right font-normal">每股配息</th>
@@ -73,6 +74,18 @@ export default function ExDividendNotice({ holdings, exDividend, today = null })
                   <span className="ml-1.5 text-[11px] text-slate-600">
                     {item.days === 0 ? '今日' : `${item.days} 天後`}
                   </span>
+                </td>
+                <td className="py-1 text-slate-400">
+                  {item.payDate ? (
+                    <>
+                      {shortDate(item.payDate, item.date)}
+                      <span className="ml-1.5 text-[11px] text-slate-600">
+                        {waitDays(item.date, item.payDate)}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-slate-600">待公告</span>
+                  )}
                 </td>
                 <td className="py-1 text-slate-300">
                   {item.code}
@@ -92,10 +105,40 @@ export default function ExDividendNotice({ holdings, exDividend, today = null })
       </div>
 
       <p className="mt-2 text-[12px] leading-relaxed text-slate-500">
-        除息當日股價會直接扣除配息金額，帳面市值同步下降，那不是下跌。
-        現金約在除息後一個多月撥付。績效頁的每日損益已在除息日把這筆金額計入，不會出現假性虧損。
+        除息當日股價會直接扣除配息金額，帳面市值同步下降，那不是下跌，錢只是還沒入帳。
+        績效頁的每日損益已在除息日把這筆金額計入，不會出現假性虧損。
+        發放日為公司或投信公告的現金股利撥付日，尚未公告時顯示「待公告」；
         金額為預估值，實際以發放通知為準；含股票股利者股數也會變動，需自行補記。
       </p>
     </section>
   );
+}
+
+/**
+ * 發放日的顯示格式。
+ *
+ * 同一年只顯示月日，與除息日的格式一致；跨年時顯示完整日期——
+ * 十二月除息、隔年二月發放是常見情形，只顯示「02-10」會被讀成兩個月前。
+ *
+ * @param {string} payDate
+ * @param {string} exDate
+ * @returns {string}
+ */
+function shortDate(payDate, exDate) {
+  return payDate.slice(0, 4) === exDate.slice(0, 4) ? payDate.slice(5) : payDate;
+}
+
+/**
+ * 除息到撥付要等幾天。
+ *
+ * 顯示等待天數而不是「距今幾天」，因為這一欄要回答的是「錢什麼時候到」，
+ * 而使用者心裡的參照點是除息日那一天。
+ *
+ * @param {string} exDate
+ * @param {string} payDate
+ * @returns {string}
+ */
+function waitDays(exDate, payDate) {
+  const days = daysBetween(exDate, payDate);
+  return days === null || days < 0 ? '' : `除息後 ${days} 天`;
 }

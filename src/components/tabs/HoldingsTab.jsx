@@ -81,8 +81,9 @@ export default function HoldingsTab() {
     const list = codesKey.split(',');
     dispatch(loadQuotes(list));
     dispatch(loadDailyStats(list));
-    // 除權息預告是全市場一次取回，與持股清單無關，因此不隨 codesKey 重複請求太多次。
-    dispatch(loadExDividend());
+    // 除權息預告是全市場一次取回。帶入持股代號是為了讓伺服器順便補上發放日，
+    // 全市場清單本身共用同一份快取，不會因為代號不同而重建。
+    dispatch(loadExDividend(list));
   }, [codesKey, dispatch]);
 
   // 與績效頁共用同一個彙總函式，兩頁的總市值、未實現損益與總淨值不會出現分歧。

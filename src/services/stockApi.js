@@ -109,9 +109,14 @@ export function fetchPeers(code) {
 /**
  * 取得即將除權息的標的清單（全市場，已公告的區間約往後兩個月）。
  * 單次請求涵蓋所有代號，由前端自行比對持股。
+ *
+ * 帶入 codes 時，伺服器會對其中確實即將除息的那幾檔補上現金股利發放日。
+ * 發放日不在證交所與櫃買的預告表裡，要另外查 FinMind，因此只對需要的代號查。
+ *
+ * @param {string[]} [codes]
  */
-export function fetchExDividend() {
-  return callApi('exdividend');
+export function fetchExDividend(codes = []) {
+  return callApi('exdividend', codes.length ? { codes: codes.join(',') } : {});
 }
 
 /**
