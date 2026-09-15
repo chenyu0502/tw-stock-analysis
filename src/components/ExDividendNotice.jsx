@@ -58,9 +58,9 @@ export default function ExDividendNotice({ holdings, exDividend, today = null })
         <table className="w-full text-xs">
           <thead>
             <tr className="text-slate-500">
+              <th className="pb-1 text-left font-normal">標的</th>
               <th className="pb-1 text-left font-normal">除息日</th>
               <th className="pb-1 text-left font-normal">發放日</th>
-              <th className="pb-1 text-left font-normal">標的</th>
               <th className="pb-1 text-right font-normal">股數</th>
               <th className="pb-1 text-right font-normal">每股配息</th>
               <th className="pb-1 text-right font-normal">預計金額</th>
@@ -69,6 +69,10 @@ export default function ExDividendNotice({ holdings, exDividend, today = null })
           <tbody className="tabular">
             {items.map((item) => (
               <tr key={`${item.code}-${item.date}`} className="border-t border-slate-800/60">
+                <td className="py-1 text-slate-300">
+                  {item.code}
+                  {item.name && <span className="ml-1.5 text-slate-500">{item.name}</span>}
+                </td>
                 <td className="py-1 text-slate-400">
                   {item.date.slice(5)}
                   <span className="ml-1.5 text-[11px] text-slate-600">
@@ -86,10 +90,6 @@ export default function ExDividendNotice({ holdings, exDividend, today = null })
                   ) : (
                     <span className="text-slate-600">待公告</span>
                   )}
-                </td>
-                <td className="py-1 text-slate-300">
-                  {item.code}
-                  {item.name && <span className="ml-1.5 text-slate-500">{item.name}</span>}
                 </td>
                 <td className="py-1 text-right text-slate-400">{int(item.shares)}</td>
                 <td className="py-1 text-right text-slate-400">
