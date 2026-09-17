@@ -872,6 +872,22 @@ export async function historyHandler(query) {
           (c) => c.close === null && c.date < todayIso && c.date >= correctableFrom
         ).length;
 
+        // 另一種缺漏：Yahoo 的序列**整根少掉**，不是給 null。
+        //
+        // 上面那個計數只看得到「有這一列但收盤是 null」，看不到「這一天根本沒回傳」。
+        // 最常見的形狀是**尾端落後**：Yahoo 的資料停在某一天，後面幾個交易日全無。
+        // 那種回應會被判為完整而快取十分鐘，於是抓到它的裝置整天都拿到殘缺資料，
+        // 另一台正常，兩台的每日損益因此對不起來——症狀是「數字怪怪的」，
+        // 完全看不出是資料缺漏。
+        //
+        // 官方月報表已經抓好了（上面用來校正收盤價），它的日期就是這一檔真正
+        // 有交易的日子，拿來比對即可涵蓋這種形狀。官方那一趟失敗時 official 是空的，
+        // 計數自然為零，不會誤報。
+        const rawDates = new Set(raw.map((c) => c.date));
+        const absentDays = [...official.keys()].filter(
+          (d) => d < todayIso && d >= correctableFrom && !rawDates.has(d)
+        ).length;
+
         // 除權息以證交所與櫃買的官方資料為準，Yahoo 的事件表僅作為補充。
         //
         // Yahoo 的事件表落後於它自己的價格：除息當天收盤價已經扣掉配息，
@@ -904,10 +920,11 @@ export async function historyHandler(query) {
             // 近幾日有幾根 K 棒的收盤價與 Yahoo 不同，已改用官方數字。供除錯對帳用。
             correctedCloses: corrected,
             // 這份資料少了幾個過去的交易日。使用端據此知道逐日損益不可信。
-            missingPastDays: droppedPast,
+            // 兩種缺漏形狀都算進來：有列但收盤為 null，以及整根沒回傳。
+            missingPastDays: droppedPast + absentDays,
             fetchedAt: new Date().toISOString(),
           },
-          complete: droppedPast === 0,
+          complete: droppedPast + absentDays === 0,
         };
       } catch (err) {
         lastError = err;

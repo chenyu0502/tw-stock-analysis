@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   BarChart,
@@ -42,6 +42,18 @@ const MONTHS_SHOWN = 18;
 const RECENT_DAYS_CHECKED = 20;
 
 /**
+ * 同一檔最多自動重抓幾次。
+ *
+ * 一定要有上限。重抓完成後 history 更新，偵測若仍成立就會再觸發一次，
+ * 沒有上限就是無限迴圈——而且上游真的沒有那幾天時，這個迴圈永遠不會停。
+ *
+ * 取 2 而不是 1：伺服器端有多個 serverless 實例，各自有獨立的記憶體快取，
+ * 第一次抓到殘缺資料的那個實例未必是第二次服務的那個。這正是同一時間
+ * 手機正確、桌機錯誤的成因，也是重抓有效的原因。
+ */
+const MAX_AUTO_REPAIR = 2;
+
+/**
  * 績效頁：損益追蹤與歷年報酬。
  */
 export default function PerformanceTab() {
@@ -52,6 +64,8 @@ export default function PerformanceTab() {
   const history = useSelector((s) => s.market.history);
   const quotes = useSelector((s) => s.market.quotes);
   const loadingHistory = useSelector((s) => s.market.loading.history);
+  // 自動修復要知道哪幾檔正在請求中，否則會對同一檔重複派發、白白用掉重試次數。
+  const historyPending = useSelector((s) => s.market.historyPending);
 
   // 權益曲線需要歷史股價，範圍是目前持股「加上」曾經交易過但已出清的標的。
   // 只抓目前持股會讓已平倉部位在持有期間的市值被算成零，整條曲線都會失真。
@@ -173,6 +187,39 @@ export default function PerformanceTab() {
       })
       .filter(Boolean);
   }, [holdings, history]);
+
+  /**
+   * 偵測到歷史股價缺了交易日就自動重抓，不必等使用者發現頁面下方的警告。
+   *
+   * 這個缺陷的症狀是**數字安靜地錯掉**：缺 K 棒的那天沿用前一筆收盤價，
+   * 當日損益被挪到下一個有價格的日子，兩天合計正確、逐日數字全錯。
+   * 而警告在月曆下方，實際使用時很容易整天沒注意到。
+   *
+   * 已在請求中的不重複派發，也不計入次數——那一次本來就會帶回新資料，
+   * 把它算成一次嘗試等於平白浪費配額。
+   */
+  const [repairAttempts, setRepairAttempts] = useState({});
+
+  useEffect(() => {
+    const targets = staleHistoryCodes
+      .map((h) => h.code)
+      .filter((code) => !historyPending[code] && (repairAttempts[code] ?? 0) < MAX_AUTO_REPAIR);
+    if (targets.length === 0) return;
+
+    setRepairAttempts((prev) => {
+      const next = { ...prev };
+      for (const code of targets) next[code] = (next[code] ?? 0) + 1;
+      return next;
+    });
+    for (const code of targets) dispatch(loadHistory({ code, range: '2y' }));
+  }, [staleHistoryCodes, historyPending, repairAttempts, dispatch]);
+
+  // 還有機會自動修好的期間顯示「正在重新載入」，用完次數仍缺才顯示警告。
+  // 兩者分開是因為意義不同：前者是暫時狀態，後者代表上游真的沒有那幾天，
+  // 數字確實不可信，使用者需要知道。
+  const repairing = staleHistoryCodes.some(
+    (h) => historyPending[h.code] || (repairAttempts[h.code] ?? 0) < MAX_AUTO_REPAIR
+  );
 
   const curveMonthly = useMemo(() => aggregateByMonth(curve), [curve]);
   const yearly = useMemo(() => aggregateByYear(curve), [curve]);
@@ -399,10 +446,18 @@ export default function PerformanceTab() {
             回到持股頁或分析頁重新載入即可補齊；若持續失敗，多半是上游暫時取不到資料。
           </p>
         )}
-        {staleHistoryCodes.length > 0 && (
+        {staleHistoryCodes.length > 0 && repairing && (
+          <p className="mt-2 rounded-lg border border-slate-700 bg-slate-900/60 px-2.5 py-2 text-[12px] leading-relaxed text-slate-400">
+            偵測到 {staleHistoryCodes.length} 檔的歷史股價缺了交易日，正在自動重新載入…
+            補齊之前，那幾天的每日損益會被挪到下一個有價格的日子。
+          </p>
+        )}
+        {staleHistoryCodes.length > 0 && !repairing && (
           <div className="mt-2 rounded-lg border border-amber-900/60 bg-amber-950/30 px-2.5 py-2 text-[12px] leading-relaxed text-amber-400">
             <p>
-              以下 {staleHistoryCodes.length} 檔的歷史股價缺了交易日，那幾天會沿用前一筆收盤價。
+              以下 {staleHistoryCodes.length} 檔的歷史股價缺了交易日，
+              已自動重新載入 {MAX_AUTO_REPAIR} 次仍然缺漏，多半是上游真的沒有這幾天的資料。
+              那幾天會沿用前一筆收盤價，
               <span className="text-amber-200">當日損益會被挪到下一個有價格的日子</span>，
               兩天的合計正確、逐日數字不正確。
             </p>
@@ -419,14 +474,16 @@ export default function PerformanceTab() {
             </ul>
             <button
               type="button"
-              onClick={() =>
+              onClick={() => {
+                // 一併清掉重試次數，這一次是使用者明確要求，自動修復也重新取得配額。
+                setRepairAttempts({});
                 staleHistoryCodes.forEach((h) =>
                   dispatch(loadHistory({ code: h.code, range: '2y' }))
-                )
-              }
+                );
+              }}
               className="mt-1.5 rounded-lg border border-amber-700 px-2 py-1 font-medium text-amber-300 transition hover:bg-amber-900/40"
             >
-              重新載入這 {staleHistoryCodes.length} 檔
+              再試一次（{staleHistoryCodes.length} 檔）
             </button>
           </div>
         )}
