@@ -843,6 +843,50 @@ export async function historyHandler(query) {
           candle.close = row.close;
         });
 
+        /*
+         * 官方有、Yahoo **整根沒回傳**的交易日，直接以官方資料補上。
+         *
+         * 上面那段只校正「已經存在的列」。Yahoo 若給 null 收盤，校正後就有值；
+         * 但它也會**整根不回傳**，那種情形校正碰不到，那一天就永遠不存在。
+         *
+         * 實測 2026-09-29：0056、00713、00878、00891、00900、00904、00915、00919、
+         * 00929、00940、00944、00403A 等十五檔 ETF 在 Yahoo 的序列裡沒有那一天，
+         * 而證交所的月報表有。症狀是每日損益被挪到下一個有價格的日子，
+         * 而且重抓完全無效——Yahoo 每次都給同一份缺漏的資料。
+         * 這與 2026-08-17 那次是同一批 ETF，屬於 Yahoo 對台股 ETF 的慣性缺漏。
+         *
+         * 官方月報表本來就已經抓回來了（上面用來校正收盤價），拿它補洞不需要
+         * 任何額外請求。
+         *
+         * 兩道界線：
+         *
+         * - **不補今天。** 今天在權益曲線裡一律以即時報價評價，補了也用不到；
+         *   而盤中官方月報表還沒有今天那列，本來就補不了。
+         * - **不補早於 Yahoo 序列起點的日期。** 官方資料涵蓋最近三個月，
+         *   range=1mo 時會比 Yahoo 的區間更長，補進去等於擅自延長查詢範圍。
+         *
+         * 成交量留 null：官方月報表的成交量欄位在上市與上櫃的單位不同
+         * （股與仟股），為了一根補上的 K 棒去處理那個單位陷阱不值得。
+         * 損益完全不用成交量，只有量能比會受一天影響。
+         */
+        const firstRawDate = raw[0]?.date;
+        let inserted = 0;
+        for (const [date, row] of official) {
+          if (date >= todayIso) continue;
+          if (firstRawDate && date < firstRawDate) continue;
+          if (raw.some((c) => c.date === date)) continue;
+          raw.push({
+            date,
+            open: row.open,
+            high: row.high,
+            low: row.low,
+            close: row.close,
+            volume: null,
+          });
+          inserted += 1;
+        }
+        if (inserted > 0) raw.sort((a, b) => a.date.localeCompare(b.date));
+
         // 仍為 null 的空列必須濾掉，保留會讓指標計算出錯。
         const candles = raw.filter((c) => c.close !== null);
 
@@ -883,9 +927,16 @@ export async function historyHandler(query) {
         // 官方月報表已經抓好了（上面用來校正收盤價），它的日期就是這一檔真正
         // 有交易的日子，拿來比對即可涵蓋這種形狀。官方那一趟失敗時 official 是空的，
         // 計數自然為零，不會誤報。
+        // 界線與上面補洞那段一致：早於 Yahoo 序列起點的官方日期不算缺漏。
+        // 官方資料涵蓋最近三個月，range=1mo 時會比 Yahoo 的區間更長，
+        // 少了這道界線，短區間的查詢會永遠被判為不完整而只快取一分鐘。
         const rawDates = new Set(raw.map((c) => c.date));
         const absentDays = [...official.keys()].filter(
-          (d) => d < todayIso && d >= correctableFrom && !rawDates.has(d)
+          (d) =>
+            d < todayIso &&
+            d >= correctableFrom &&
+            (!firstRawDate || d >= firstRawDate) &&
+            !rawDates.has(d)
         ).length;
 
         // 除權息以證交所與櫃買的官方資料為準，Yahoo 的事件表僅作為補充。
@@ -919,6 +970,8 @@ export async function historyHandler(query) {
             dividends,
             // 近幾日有幾根 K 棒的收盤價與 Yahoo 不同，已改用官方數字。供除錯對帳用。
             correctedCloses: corrected,
+            // Yahoo 整根沒回傳、由官方月報表補上的 K 棒數。同樣供除錯對帳用。
+            insertedCloses: inserted,
             // 這份資料少了幾個過去的交易日。使用端據此知道逐日損益不可信。
             // 兩種缺漏形狀都算進來：有列但收盤為 null，以及整根沒回傳。
             missingPastDays: droppedPast + absentDays,
