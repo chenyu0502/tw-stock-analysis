@@ -54,6 +54,15 @@ const RECENT_DAYS_CHECKED = 20;
 const MAX_AUTO_REPAIR = 2;
 
 /**
+ * 自動修復一次最多同時重抓幾檔。
+ *
+ * 每一檔是兩年份的日 K，伺服器端還要為它抓官方月報表校正近幾日收盤。
+ * 一次派發十幾檔正是 README 記載過把 `/api/history` 打到 504 的請求形狀。
+ * 分批派發，剩下的由下一輪偵測接手——偵測本來就會在 history 更新後重跑。
+ */
+const AUTO_REPAIR_BATCH = 5;
+
+/**
  * 績效頁：損益追蹤與歷年報酬。
  */
 export default function PerformanceTab() {
@@ -168,11 +177,30 @@ export default function PerformanceTab() {
   // 因此改成比對「其他標的有、這一檔沒有」的交易日，兩種形狀一起涵蓋。
   // 不需要台股行事曆；只看最近這段，更早的缺漏對當期對帳沒有意義。
   // 該檔第一根 K 棒之前的日期不算，新上市的標的不該被誤報。
+  //
+  // **今天那一格必須排除，否則會變成大規模假警報。**
+  //
+  // 今天的 K 棒不是同時到齊的：Yahoo 對台股 ETF 的當日收盤常給 null，
+  // 那種列會被伺服器濾掉，而正常交易的個股有值、會保留。於是「所有標的的
+  // 日期聯集」含有今天，沒有今天那根的標的**全部**被判為缺漏——
+  // 實際遇到的是一次報 16 檔。
+  //
+  // 而且這種警報既無意義也修不掉：
+  //
+  // 1. 無意義——今天那根 K 棒在權益曲線裡從頭到尾用不到，一律以即時報價評價
+  //    （見 buildEquityCurve 的 liveDate）。缺它不影響任何數字。
+  // 2. 修不掉——重抓也拿不到上游還沒發布的當日收盤，自動修復只是白跑，
+  //    16 檔 × 2 次 × 兩年份的請求形狀正是先前把 /api/history 打到 504 的那一種。
+  //
+  // 昨天以前不排除：那些日子的 K 棒確實會被用到，缺了就是真的會算錯。
   const staleHistoryCodes = useMemo(() => {
     const candlesOf = (code) => history[code]?.candles ?? [];
     const union = new Set();
     for (const h of holdings) for (const c of candlesOf(h.code)) union.add(c.date);
-    const recent = [...union].sort().slice(-RECENT_DAYS_CHECKED);
+    const recent = [...union]
+      .filter((d) => d < day)
+      .sort()
+      .slice(-RECENT_DAYS_CHECKED);
     if (recent.length === 0) return [];
 
     return holdings
@@ -186,7 +214,7 @@ export default function PerformanceTab() {
         return missing.length > 0 ? { code: h.code, missing } : null;
       })
       .filter(Boolean);
-  }, [holdings, history]);
+  }, [holdings, history, day]);
 
   /**
    * 偵測到歷史股價缺了交易日就自動重抓，不必等使用者發現頁面下方的警告。
@@ -203,7 +231,8 @@ export default function PerformanceTab() {
   useEffect(() => {
     const targets = staleHistoryCodes
       .map((h) => h.code)
-      .filter((code) => !historyPending[code] && (repairAttempts[code] ?? 0) < MAX_AUTO_REPAIR);
+      .filter((code) => !historyPending[code] && (repairAttempts[code] ?? 0) < MAX_AUTO_REPAIR)
+      .slice(0, AUTO_REPAIR_BATCH);
     if (targets.length === 0) return;
 
     setRepairAttempts((prev) => {
