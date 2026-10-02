@@ -19,6 +19,8 @@ import { num, pct, int } from '../../lib/format.js';
 import LevelLadder from '../LevelLadder.jsx';
 import ValuationBands from '../ValuationBands.jsx';
 import PeerComparison from '../PeerComparison.jsx';
+import HealthScore from '../HealthScore.jsx';
+import { computeHealth } from '../../lib/health.js';
 
 /**
  * AI 頁：型態分析與支撐壓力區間推估。
@@ -144,6 +146,20 @@ export default function AiTab() {
   const fundamentals = fundamentalsMap[code] ?? null;
   const peers = peersMap[code] ?? null;
 
+  // 體質評分。純計算，不呼叫 AI，與風險清單同性質。
+  // 用的是未壓縮的 fundamentals 與 peers：壓縮版是為提示詞瘦身用的，
+  // 評分需要的是完整欄位（例如 bands 的 percentile 與 peers 的 sufficient）。
+  const health = useMemo(
+    () =>
+      computeHealth({
+        price: input?.price ?? null,
+        indicators: input?.indicators ?? null,
+        fundamentals,
+        peers,
+      }),
+    [input, fundamentals, peers]
+  );
+
   // 規則型風險清單。純計算，不呼叫 AI，因此不需要按任何按鈕就能顯示。
   const risks = useMemo(
     () =>
@@ -244,6 +260,17 @@ export default function AiTab() {
           {result.reason}
         </div>
       )}
+
+      {/* 體質評分放最前面：它是整檔的概觀，而且純計算，不必按任何按鈕。 */}
+      <Panel
+        title="體質評分"
+        note="六個面向依固定門檻計分，缺項不給零分而是從分母移除。等級描述體質強弱，不是買賣建議。全部由程式計算，不經過 AI。"
+      >
+        <HealthScore
+          health={health}
+          loading={loadingFundamentals && !fundamentals}
+        />
+      </Panel>
 
       {/* 價位結構。即使還沒呼叫 AI 也先顯示，這部分是程式算的，不依賴模型。 */}
       {input && (
