@@ -90,6 +90,33 @@ export function changeColor(value) {
 }
 
 /**
+ * 體質燈號的顏色 class。
+ *
+ * 配色由使用者指定：強健琥珀、健康綠、普通灰、偏弱紅。
+ *
+ * **這組顏色與台股漲跌色是相反的**（本站紅代表上漲、綠代表下跌，見 changeColor），
+ * 因此燈號一律連同文字標籤一起顯示，絕不只用顏色表示等級——
+ * 少了文字，紅色燈號會被讀成「今天漲」。
+ *
+ * @param {string|null|undefined} key LIGHTS 的 key，null 代表涵蓋率不足
+ * @returns {string}
+ */
+export function healthColor(key) {
+  switch (key) {
+    case 'strong':
+      return 'border-amber-500/40 bg-amber-500/10 text-amber-400';
+    case 'healthy':
+      return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400';
+    case 'fair':
+      return 'border-slate-600/50 bg-slate-700/20 text-slate-300';
+    case 'weak':
+      return 'border-rose-500/40 bg-rose-500/10 text-rose-400';
+    default:
+      return 'border-slate-700/50 bg-slate-800/40 text-slate-500';
+  }
+}
+
+/**
  * 依均線交叉狀態取得對應的顏色 class。
  * @param {string} state 來自 indicators.crossState 的 state 值
  * @returns {string}

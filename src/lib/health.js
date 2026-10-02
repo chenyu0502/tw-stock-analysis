@@ -18,6 +18,8 @@
  * 要調整時不必翻動計分邏輯。
  */
 
+import { sma } from './indicators.js';
+
 /* ------------------------------------------------------------------ */
 /* 計分工具                                                            */
 /* ------------------------------------------------------------------ */
@@ -220,7 +222,7 @@ export const DIMENSIONS = [
  */
 export const LIGHTS = [
   { key: 'strong', label: '強健', min: 75 },
-  { key: 'steady', label: '穩健', min: 60 },
+  { key: 'healthy', label: '健康', min: 60 },
   { key: 'fair', label: '普通', min: 45 },
   { key: 'weak', label: '偏弱', min: 0 },
 ];
@@ -233,6 +235,43 @@ export const LIGHTS = [
  * 那是誤導。分數與各項得分照樣顯示，但等級改為「資料不足」。
  */
 export const MIN_COVERAGE = 50;
+
+/* ------------------------------------------------------------------ */
+/* 趨勢面輸入                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 從 K 線取出趨勢面評分需要的最小輸入。
+ *
+ * AI 頁走 buildAnalysisInput，它會一併算出十幾個指標；清單上只需要現價與
+ * 120 日均線兩樣，為了一顆燈號跑整套指標是浪費。
+ *
+ * **公式必須與 buildAnalysisInput 完全相同**，否則同一檔在清單與 AI 頁會算出
+ * 不同的分數——那正是這個專案一路在修的那種「兩頁數字對不上」。
+ * 現價取最後一根收盤價，與 computeLevels 的 price 同源；均線斜率取近 20 日變化率。
+ *
+ * @param {object[]} candles
+ * @returns {{ price: number|null, indicators: { ma120: number|null, ma120Slope: number|null } }}
+ */
+export function trendInputFromCandles(candles) {
+  if (!Array.isArray(candles) || candles.length === 0) {
+    return { price: null, indicators: { ma120: null, ma120Slope: null } };
+  }
+
+  const closes = candles.map((c) => c.close);
+  const last = closes.length - 1;
+  const series = sma(closes, 120);
+  const ma120 = series[last];
+  const prev = series[Math.max(0, last - 20)];
+
+  return {
+    price: closes[last] ?? null,
+    indicators: {
+      ma120,
+      ma120Slope: ma120 !== null && prev ? ((ma120 - prev) / prev) * 100 : null,
+    },
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /* 主計算                                                              */

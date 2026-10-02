@@ -5,6 +5,7 @@ import MarketIndices from '../MarketIndices.jsx';
 import { addWatch, removeWatch, updateWatch } from '../../store/portfolioSlice.js';
 import { loadQuotes, loadDailyStats } from '../../store/marketSlice.js';
 import { useMarketPolling } from '../../lib/useMarketPolling.js';
+import { useHealthScores } from '../../lib/useHealthScores.js';
 import StockCard from '../StockCard.jsx';
 
 /** 報價自動更新間隔。台股盤中每 30 秒更新一次已足夠，過於頻繁只是浪費上游額度。 */
@@ -36,6 +37,9 @@ export default function AnalysisTab() {
   useMarketPolling(() => {
     if (codesKey) dispatch(loadQuotes(codesKey.split(',')));
   }, QUOTE_REFRESH_MS);
+
+  // 體質燈號。財報逐檔排隊載入，燈號會由上往下陸續出現。
+  const healthByCode = useHealthScores(codes);
 
   function handleAdd(e) {
     e.preventDefault();
@@ -100,6 +104,7 @@ export default function AnalysisTab() {
               item={item}
               onRemove={(code) => dispatch(removeWatch(code))}
               onUpdate={(code, patch) => dispatch(updateWatch({ code, patch }))}
+              health={healthByCode[item.code] ?? null}
             />
           ))}
         </div>

@@ -21,6 +21,7 @@ import {
   upsertHolding,
 } from '../../store/portfolioSlice.js';
 import { loadQuotes, loadDailyStats, loadExDividend } from '../../store/marketSlice.js';
+import { useHealthScores } from '../../lib/useHealthScores.js';
 import { tradeCost } from '../../lib/fees.js';
 import {
   exportExcel,
@@ -75,6 +76,9 @@ export default function HoldingsTab() {
   const netFlow = useMemo(() => cashFlows.reduce((acc, f) => acc + f.amount, 0), [cashFlows]);
 
   const codesKey = holdings.map((h) => h.code).join(',');
+
+  // 體質燈號。財報逐檔排隊載入，燈號會由上往下陸續出現。
+  const healthByCode = useHealthScores(useMemo(() => holdings.map((h) => h.code), [holdings]));
 
   useEffect(() => {
     if (!codesKey) return;
@@ -481,6 +485,7 @@ export default function HoldingsTab() {
               item={row}
               onRemove={(code) => dispatch(removeHolding(code))}
               onUpdate={(code, patch) => dispatch(updateHolding({ code, patch }))}
+              health={healthByCode[row.code] ?? null}
               extra={
                 <div className="tabular grid grid-cols-4 gap-2 border-t border-slate-800/70 px-3 py-2 text-xs">
                   <EditableCell

@@ -9,6 +9,7 @@ import { maStances, STANCE_LABEL, compareStanceStrategies } from '../lib/stance.
 import { detectPattern } from '../lib/patterns.js';
 import PriceChart from './PriceChart.jsx';
 import InstitutionalChart from './InstitutionalChart.jsx';
+import HealthBadge from './HealthBadge.jsx';
 
 /** 法人買賣超歷史的預設查詢天數。 */
 const CHIP_DAYS = 30;
@@ -20,10 +21,15 @@ const CHIP_DAYS = 30;
  *   item: object,
  *   onRemove: (code: string) => void,
  *   onUpdate: (code: string, patch: object) => void,
- *   extra?: import('react').ReactNode
+ *   extra?: import('react').ReactNode,
+ *   health?: object|null
  * }} props
+ *
+ * health 由呼叫端傳入而不是卡片自己算：它需要財報，而財報一檔要打五個 FinMind
+ * 資料集。每張卡各自去抓，二十幾張就是上百個上游請求同時送出。
+ * 由頁面層的 useHealthScores 統一排隊，卡片只負責顯示。
  */
-export default function StockCard({ item, onRemove, onUpdate, extra }) {
+export default function StockCard({ item, onRemove, onUpdate, extra, health = null }) {
   const dispatch = useDispatch();
   const [expanded, setExpanded] = useState(false);
   const [optimizing, setOptimizing] = useState(false);
@@ -120,6 +126,8 @@ export default function StockCard({ item, onRemove, onUpdate, extra }) {
             <div className="flex items-baseline gap-2">
               <span className="tabular font-semibold">{item.code}</span>
               <span className="truncate text-sm text-slate-400">{name}</span>
+              {/* 體質燈號緊接名稱。分數與六個面向的拆解在 AI 頁，這裡只給結論。 */}
+              <HealthBadge health={health} showScore />
             </div>
             {analysis && (
               <div className="mt-1 flex flex-wrap items-center gap-1">

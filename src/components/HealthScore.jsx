@@ -1,4 +1,5 @@
 import { MIN_COVERAGE } from '../lib/health.js';
+import { healthColor } from '../lib/format.js';
 
 /**
  * 體質評分。
@@ -7,23 +8,18 @@ import { MIN_COVERAGE } from '../lib/health.js';
  * （見 stance.js 的說明），而「體質強健」與「現在該買」是兩件事——
  * 一家好公司可以買在很差的價位。
  *
- * 顏色刻意避開紅綠。台股紅漲綠跌，用紅色標「偏弱」會被讀成「下跌」，
- * 用綠色標「強健」會被讀成「跌」。沿用估值面板那套中性的天藍與琥珀。
+ * 顏色由使用者指定（強健琥珀、健康綠、普通灰、偏弱紅），集中在 format.js 的
+ * healthColor，與清單上的 HealthBadge 共用同一份定義，兩處不會各自漂移。
+ * 這組顏色與台股漲跌色相反，因此等級一律連同文字標籤顯示，絕不只用顏色表示。
  */
-const LIGHT_STYLE = {
-  strong: 'border-sky-500/40 bg-sky-500/10 text-sky-300',
-  steady: 'border-indigo-500/40 bg-indigo-500/10 text-indigo-300',
-  fair: 'border-slate-600/50 bg-slate-700/20 text-slate-300',
-  weak: 'border-amber-500/40 bg-amber-500/10 text-amber-400',
-};
 
-/** 進度條顏色沿用同一套分級，讓條與燈號讀起來是同一個尺度。 */
+/** 進度條顏色沿用同一套分級門檻，讓條與燈號讀起來是同一個尺度。 */
 function barColor(score) {
   if (score === null) return 'bg-slate-800';
-  if (score >= 75) return 'bg-sky-400/80';
-  if (score >= 60) return 'bg-indigo-400/70';
+  if (score >= 75) return 'bg-amber-500/70';
+  if (score >= 60) return 'bg-emerald-500/70';
   if (score >= 45) return 'bg-slate-500/70';
-  return 'bg-amber-500/70';
+  return 'bg-rose-500/70';
 }
 
 /**
@@ -60,11 +56,7 @@ export default function HealthScore({ health, loading = false }) {
           </div>
         </div>
 
-        <span
-          className={`rounded border px-2 py-0.5 text-xs ${
-            light ? LIGHT_STYLE[light.key] : 'border-slate-700/50 bg-slate-800/40 text-slate-500'
-          }`}
-        >
+        <span className={`rounded border px-2 py-0.5 text-xs ${healthColor(light?.key)}`}>
           {light ? light.label : '資料不足'}
         </span>
 
@@ -89,7 +81,8 @@ export default function HealthScore({ health, loading = false }) {
 
       <p className="text-[12px] leading-relaxed text-slate-600">
         等級描述的是<span className="text-slate-400">體質強弱，不是買賣建議</span>
-        ——好公司也可能買在很差的價位。
+        ——好公司也可能買在很差的價位。等級的顏色與台股漲跌色相反，
+        因此一律連同文字標籤呈現，不只用顏色表示。
         分數由固定門檻計算，輸入相同就得到相同結果，不經過 AI。
         每一項都附上觸發它的實際數值，可自行驗證也可以不同意。
         權重刻意偏向中長期：KD、MACD、RSI 完全不計入，那些回答的是「現在在什麼位置」，
