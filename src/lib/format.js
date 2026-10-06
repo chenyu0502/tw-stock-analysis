@@ -90,6 +90,46 @@ export function changeColor(value) {
 }
 
 /**
+ * 判斷是否漲停或跌停。
+ *
+ * 漲跌停價由 MIS 直接提供（`limitUp`、`limitDown`），不需要自己用前一日收盤
+ * 乘上 10% 推算——那樣會在股票股利、減資、新股上市這些情形算錯。
+ *
+ * 兩個判斷上的細節：
+ *
+ * 1. **用誤差容忍而不是等號比較。** 兩個數字雖然同源，仍是經過字串解析的浮點數，
+ *    直接用 `===` 會在某些價位漏判。
+ * 2. **必須當天有成交量。** 盤前沒有成交價時，`price` 會退回最佳委買價
+ *    （見 quoteHandler），熱門股的漲停買盤掛單會讓它等於漲停價。那是「買盤在漲停價」，
+ *    不是「漲停」，用成交量當門閂即可擋掉——盤前成交量為零。
+ *
+ * @param {object|null|undefined} quote
+ * @returns {'up'|'down'|null}
+ */
+export function limitState(quote) {
+  const { price, limitUp, limitDown, volume } = quote ?? {};
+  if (!Number.isFinite(price) || !Number.isFinite(volume) || volume <= 0) return null;
+  if (Number.isFinite(limitUp) && price >= limitUp - 0.005) return 'up';
+  if (Number.isFinite(limitDown) && price <= limitDown + 0.005) return 'down';
+  return null;
+}
+
+/**
+ * 漲跌停時標的名稱的背景方塊 class。
+ *
+ * 沿用台股紅漲綠跌：漲停紅底、跌停綠底。這與體質燈號的配色方向相反，
+ * 但兩者講的是不同的事——這一個講的就是當天的漲跌，用漲跌色才是對的。
+ *
+ * @param {'up'|'down'|null} state limitState 的結果
+ * @returns {string}
+ */
+export function limitBlockClass(state) {
+  if (state === 'up') return 'rounded bg-rose-600/90 px-1.5 py-0.5 font-medium text-white';
+  if (state === 'down') return 'rounded bg-emerald-600/90 px-1.5 py-0.5 font-medium text-white';
+  return 'text-slate-400';
+}
+
+/**
  * 體質燈號的顏色 class。
  *
  * 配色由使用者指定：強健琥珀、健康綠、普通灰、偏弱紅。

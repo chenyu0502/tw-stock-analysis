@@ -4,7 +4,15 @@ import { ChevronDown, ChevronUp, Trash2, Wand2 } from 'lucide-react';
 import { loadHistory, loadInstitutionalHistory, isHistoryStale } from '../store/marketSlice.js';
 import { today } from '../store/portfolioSlice.js';
 import { crossState, kd, macd, rsi, bias, atr, optimizeMaPeriods } from '../lib/indicators.js';
-import { num, pct, int, changeColor, stateColor } from '../lib/format.js';
+import {
+  num,
+  pct,
+  int,
+  changeColor,
+  stateColor,
+  limitState,
+  limitBlockClass,
+} from '../lib/format.js';
 import { maStances, STANCE_LABEL, compareStanceStrategies } from '../lib/stance.js';
 import { detectPattern } from '../lib/patterns.js';
 import PriceChart from './PriceChart.jsx';
@@ -112,6 +120,8 @@ export default function StockCard({ item, onRemove, onUpdate, extra, health = nu
   }
 
   const name = quote?.name || valuation?.name || margin?.name || item.code;
+  // 漲跌停狀態。漲跌停價由 MIS 直接提供，不自己用前一日收盤推算。
+  const limit = limitState(quote);
 
   return (
     <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900/50">
@@ -125,7 +135,13 @@ export default function StockCard({ item, onRemove, onUpdate, extra, health = nu
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline gap-2">
               <span className="tabular font-semibold">{item.code}</span>
-              <span className="truncate text-sm text-slate-400">{name}</span>
+              {/* 漲停紅底、跌停綠底。沒有觸及漲跌停時就是原本的灰色文字，沒有方塊。 */}
+              <span
+                className={`truncate text-sm ${limitBlockClass(limit)}`}
+                title={limit === 'up' ? '漲停' : limit === 'down' ? '跌停' : undefined}
+              >
+                {name}
+              </span>
               {/* 體質燈號緊接名稱。分數與六個面向的拆解在 AI 頁，這裡只給結論。 */}
               <HealthBadge health={health} showScore />
             </div>
