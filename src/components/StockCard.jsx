@@ -12,6 +12,7 @@ import {
   stateColor,
   limitState,
   limitBlockClass,
+  limitLabel,
 } from '../lib/format.js';
 import { maStances, STANCE_LABEL, compareStanceStrategies } from '../lib/stance.js';
 import { detectPattern } from '../lib/patterns.js';
@@ -137,8 +138,8 @@ export default function StockCard({ item, onRemove, onUpdate, extra, health = nu
               <span className="tabular font-semibold">{item.code}</span>
               {/* 漲停紅底、跌停綠底。沒有觸及漲跌停時就是原本的灰色文字，沒有方塊。 */}
               <span
-                className={`truncate text-sm ${limitBlockClass(limit)}`}
-                title={limit === 'up' ? '漲停' : limit === 'down' ? '跌停' : undefined}
+                className={`truncate text-sm ${limit ? limitBlockClass(limit) : 'text-slate-400'}`}
+                title={limitLabel(limit)}
               >
                 {name}
               </span>

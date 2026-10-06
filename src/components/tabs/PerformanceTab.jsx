@@ -27,7 +27,16 @@ import {
   todayPnl,
   reconcileShares,
 } from '../../lib/performance.js';
-import { money, pct, num, int, changeColor } from '../../lib/format.js';
+import {
+  money,
+  pct,
+  num,
+  int,
+  changeColor,
+  limitState,
+  limitBlockClass,
+  limitLabel,
+} from '../../lib/format.js';
 import PnlCalendar from '../PnlCalendar.jsx';
 
 /** 月損益走勢顯示的月份數。 */
@@ -256,7 +265,16 @@ export default function PerformanceTab() {
   const monthly = useMemo(() => curveMonthly.slice(-MONTHS_SHOWN), [curveMonthly]);
   // 當日損益一律「庫存股數 × 當日漲跌」，不對今日成交做特別處理、也不扣手續費。
   // 理由見 todayPnl：交易紀錄的日期是登錄日而非成交日，特別處理反而會算錯。
-  const today = useMemo(() => todayPnl(holdings, quotes), [holdings, quotes]);
+  //
+  // 漲跌停狀態另外併上去。todayPnl 只負責損益計算，刻意不帶報價的漲跌停欄位，
+  // 那是顯示用的資訊；在這裡補一次，每一列只判定一次。
+  const today = useMemo(() => {
+    const result = todayPnl(holdings, quotes);
+    return {
+      ...result,
+      items: result.items.map((i) => ({ ...i, limit: limitState(quotes[i.code]) })),
+    };
+  }, [holdings, quotes]);
 
   // 成本法的部位彙總，與持股頁共用同一個函式，兩頁數字保證一致。
   const position = useMemo(() => positionSummary(holdings, quotes, cash), [holdings, quotes, cash]);
@@ -436,7 +454,19 @@ export default function PerformanceTab() {
                     <div className="text-slate-300 sm:inline">{item.code}</div>
                     {item.name && (
                       <div className="whitespace-nowrap text-slate-500 sm:ml-1.5 sm:inline">
-                        {item.name}
+                        {/* 漲跌停才套背景方塊。方塊掛在內層的 span 上，不是這個 div——
+                            窄螢幕時這個 div 是區塊元素，背景會整欄拉滿。
+                            沒有漲跌停時維持原樣，連 span 都不加。 */}
+                        {item.limit ? (
+                          <span
+                            className={limitBlockClass(item.limit)}
+                            title={limitLabel(item.limit)}
+                          >
+                            {item.name}
+                          </span>
+                        ) : (
+                          item.name
+                        )}
                       </div>
                     )}
                   </td>

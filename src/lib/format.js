@@ -120,13 +120,24 @@ export function limitState(quote) {
  * 沿用台股紅漲綠跌：漲停紅底、跌停綠底。這與體質燈號的配色方向相反，
  * 但兩者講的是不同的事——這一個講的就是當天的漲跌，用漲跌色才是對的。
  *
+ * **只負責漲跌停那兩種狀態，沒有漲跌停時回空字串，平常的文字顏色由呼叫端自己決定。**
+ * 原本這裡會回傳一個預設顏色，那是個陷阱：它只湊巧符合第一個使用它的地方，
+ * 第二處的名稱是另一個灰階，照用就會把平常的外觀一起改掉。
+ *
  * @param {'up'|'down'|null} state limitState 的結果
  * @returns {string}
  */
 export function limitBlockClass(state) {
   if (state === 'up') return 'rounded bg-rose-600/90 px-1.5 py-0.5 font-medium text-white';
   if (state === 'down') return 'rounded bg-emerald-600/90 px-1.5 py-0.5 font-medium text-white';
-  return 'text-slate-400';
+  return '';
+}
+
+/** 漲跌停的文字說明，用於 title 屬性。 */
+export function limitLabel(state) {
+  if (state === 'up') return '漲停';
+  if (state === 'down') return '跌停';
+  return undefined;
 }
 
 /**
