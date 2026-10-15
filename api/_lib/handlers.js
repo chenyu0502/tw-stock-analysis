@@ -1442,6 +1442,122 @@ export async function peersHandler(query, env = {}) {
 }
 
 /* ------------------------------------------------------------------ */
+/* 端點：當日分時走勢                                                   */
+/* ------------------------------------------------------------------ */
+
+/** 台股價格最多兩位小數。Yahoo 回的是浮點數，32.2599983215332 要收成 32.26。 */
+function round2(value) {
+  return Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
+}
+
+/**
+ * GET /api/intraday?code=2330
+ *
+ * 當日逐分鐘走勢。**刻意不掛在 /api/history 上。**
+ *
+ * 那支端點後面接了一整串只對日 K 有意義的後處理：官方月報表校正收盤價、
+ * 用官方資料補整根缺掉的 K 棒、missingPastDays 缺漏偵測、除權息事件合併。
+ * 分時資料塞進去不會報錯，會壞得很安靜——月報表是一天一筆，對不上任何一分鐘，
+ * 補洞那段還會把「日期」當成分鐘插進序列裡。
+ *
+ * 這一層只做取回與正規化，不做任何校正。**官方沒有免費的逐分鐘資料**，
+ * 無從對照，只能照 Yahoo 給的呈現。這與日 K 的可靠性不同級，介面必須說明。
+ */
+export async function intradayHandler(query) {
+  const code = String(query.code ?? '').trim();
+  if (!/^\d{4,6}[A-Z]?$/.test(code)) {
+    return { status: 400, body: { error: '代號格式不正確' } };
+  }
+
+  const body = await withCache(`intraday:${code}`, TTL.INTRADAY, async () => {
+    // 與 historyHandler 相同的後綴策略：只在對照表已經快取時用它決定順序，
+    // 猜錯只是多打一次 Yahoo。理由見 peekMarket。
+    const market = peekMarket(code);
+    const suffixes = market === 'OTC' ? ['.TWO', '.TW'] : ['.TW', '.TWO'];
+
+    let lastError;
+    for (const suffix of suffixes) {
+      try {
+        const url = `${YAHOO_CHART}/${code}${suffix}?interval=1m&range=1d`;
+        const json = await fetchJson(url);
+        const result = json?.chart?.result?.[0];
+        if (!result?.timestamp?.length) {
+          lastError = new Error('無分時資料');
+          continue;
+        }
+
+        const q = result.indicators?.quote?.[0] ?? {};
+        const points = [];
+        result.timestamp.forEach((ts, i) => {
+          const close = round2(q.close?.[i]);
+          // 沒有成交的那一分鐘整筆捨棄，不用零或前一筆充數。
+          //
+          // 實測 00919 的 11:07 就是 null（當下尚無成交）。填零會讓線直接掉到底；
+          // 而 X 軸是時間軸，少一個頂點只是讓線段跨過那一分鐘，
+          // 視覺上等同於沿用前一價，又不必憑空造一個數值出來。
+          if (close === null) return;
+          points.push({
+            time: ts,
+            close,
+            // Yahoo 的分時成交量單位是股，與日 K 相同，一律換算為張。
+            volume: Number.isFinite(q.volume?.[i]) ? q.volume[i] / SHARES_PER_LOT : null,
+          });
+        });
+
+        if (points.length === 0) {
+          lastError = new Error('分時資料全為空值');
+          continue;
+        }
+
+        const session = result.meta?.currentTradingPeriod?.regular ?? null;
+        const prevClose = round2(result.meta?.chartPreviousClose);
+        const latest = points[points.length - 1];
+        const change = prevClose === null ? null : round2(latest.close - prevClose);
+
+        return {
+          code,
+          symbol: `${code}${suffix}`,
+          market: suffix === '.TWO' ? 'OTC' : 'TSE',
+          // 分時圖的基準線。Yahoo 直接給，不必自己回頭查前一個交易日。
+          prevClose,
+          /*
+           * 盤中區間的起訖時間戳（秒）。
+           *
+           * X 軸一定要用這一段當定義域，不能用資料點的範圍：
+           *
+           * 1. **起點不固定。** 實測 2330 從 09:00 開始，00919 從 09:02 開始，
+           *    依索引對齊會讓整張圖平移兩分鐘。
+           * 2. **盤中橫軸會隨時間伸縮。** 若讓軸貼著資料走，11:00 看到的斜率與
+           *    13:30 看到的不能互相比較，而那正是看分時圖的重點。
+           */
+          session: session
+            ? { start: session.start, end: session.end }
+            : null,
+          // 最後一筆的時間戳可能不是整分（實測 11:07:37），那是進行中的那一根。
+          points,
+          latest: {
+            price: latest.close,
+            time: latest.time,
+            change,
+            changePercent:
+              change !== null && prevClose ? round2((change / prevClose) * 100) : null,
+          },
+          totalVolume: round2(
+            points.reduce((acc, p) => acc + (p.volume ?? 0), 0)
+          ),
+          fetchedAt: new Date().toISOString(),
+        };
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw lastError ?? new Error('查無分時資料');
+  });
+
+  return { status: 200, body };
+}
+
+/* ------------------------------------------------------------------ */
 /* 路由表                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -1449,6 +1565,7 @@ export async function peersHandler(query, env = {}) {
 export const routes = {
   quote: quoteHandler,
   history: historyHandler,
+  intraday: intradayHandler,
   margin: marginHandler,
   institutional: institutionalHandler,
   valuation: valuationHandler,

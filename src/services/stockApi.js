@@ -49,6 +49,17 @@ export function fetchHistory(code, options = {}) {
 }
 
 /**
+ * 取得單檔的當日逐分鐘走勢。
+ *
+ * 另有專屬端點而非沿用 fetchHistory：/api/history 後面接了一串只對日 K 有意義的
+ * 後處理（官方收盤校正、補洞、缺漏偵測、除權息合併），分時資料走那條路會壞得很安靜。
+ * @param {string} code
+ */
+export function fetchIntraday(code) {
+  return callApi('intraday', { code });
+}
+
+/**
  * 取得融資融券資料。
  * @param {string[]} codes
  */

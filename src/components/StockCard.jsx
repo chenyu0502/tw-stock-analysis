@@ -1,7 +1,12 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { ChevronDown, ChevronUp, Trash2, Wand2 } from 'lucide-react';
-import { loadHistory, loadInstitutionalHistory, isHistoryStale } from '../store/marketSlice.js';
+import {
+  loadHistory,
+  loadInstitutionalHistory,
+  loadIntraday,
+  isHistoryStale,
+} from '../store/marketSlice.js';
 import { today } from '../store/portfolioSlice.js';
 import { crossState, kd, macd, rsi, bias, atr, optimizeMaPeriods } from '../lib/indicators.js';
 import {
@@ -17,11 +22,16 @@ import {
 import { maStances, STANCE_LABEL, compareStanceStrategies } from '../lib/stance.js';
 import { detectPattern } from '../lib/patterns.js';
 import PriceChart from './PriceChart.jsx';
+import IntradayChart from './IntradayChart.jsx';
+import { useMarketPolling } from '../lib/useMarketPolling.js';
 import InstitutionalChart from './InstitutionalChart.jsx';
 import HealthBadge from './HealthBadge.jsx';
 
 /** 法人買賣超歷史的預設查詢天數。 */
 const CHIP_DAYS = 30;
+
+/** 分時圖的更新間隔。資料一分鐘才多一個點，比這更頻繁沒有意義。 */
+const INTRADAY_REFRESH_MS = 60_000;
 
 /**
  * 單一標的的卡片。收合時顯示報價與訊號摘要，展開後顯示走勢圖與完整指標。
@@ -43,6 +53,8 @@ export default function StockCard({ item, onRemove, onUpdate, extra, health = nu
   const [expanded, setExpanded] = useState(false);
   const [optimizing, setOptimizing] = useState(false);
   const [optimizeResult, setOptimizeResult] = useState(null);
+  // 圖表模式。預設日 K——收合再展開時回到比較常看的那一張。
+  const [chartMode, setChartMode] = useState('daily');
 
   const quote = useSelector((s) => s.market.quotes[item.code]);
   const history = useSelector((s) => s.market.history[item.code]);
@@ -50,6 +62,9 @@ export default function StockCard({ item, onRemove, onUpdate, extra, health = nu
   const margin = useSelector((s) => s.market.margin[item.code]);
   const institutional = useSelector((s) => s.market.institutional[item.code]);
   const chipHistory = useSelector((s) => s.market.institutionalHistory[item.code]);
+  const intraday = useSelector((s) => s.market.intraday[item.code]) ?? null;
+  const intradayError = useSelector((s) => s.market.intradayError[item.code]) ?? null;
+  const loadingIntraday = useSelector((s) => s.market.loading.intraday);
 
   // 歷史 K 線一律載入，因為收合狀態的標題列也要顯示均線攻守狀態。
   //
@@ -70,6 +85,19 @@ export default function StockCard({ item, onRemove, onUpdate, extra, health = nu
     if (!expanded) return;
     if (!chipHistory) dispatch(loadInstitutionalHistory({ code: item.code, days: CHIP_DAYS }));
   }, [expanded, chipHistory, item.code, dispatch]);
+
+  // 分時資料只在「展開且切到分時」時才抓。一百多筆的序列不該為了二十幾張收合的
+  // 卡片整批抓回來，這與法人歷史延後載入是同一個考量。
+  useEffect(() => {
+    if (!expanded || chartMode !== 'intraday') return;
+    if (!intraday && !intradayError) dispatch(loadIntraday({ code: item.code }));
+  }, [expanded, chartMode, intraday, intradayError, item.code, dispatch]);
+
+  // 看著分時圖的時候要持續更新，否則線會停在切過去的那一刻。
+  // 前景與交易時段兩道閘門由 useMarketPolling 負責，收盤後與分頁在背景時不會打上游。
+  useMarketPolling(() => {
+    if (expanded && chartMode === 'intraday') dispatch(loadIntraday({ code: item.code }));
+  }, INTRADAY_REFRESH_MS);
 
   const candles = history?.candles ?? [];
 
@@ -196,11 +224,45 @@ export default function StockCard({ item, onRemove, onUpdate, extra, health = nu
       {/* 展開區 */}
       {expanded && (
         <div className="space-y-4 border-t border-slate-800 p-3">
-          {candles.length === 0 ? (
+          {/* 分時與日 K 的切換。
+              兩者是不同的問題：分時回答「今天盤中怎麼走」，日 K 回答「價格結構與
+              均線關係」。放成切換而不是並列，是因為兩張圖疊起來會把下面的指標
+              整個推出畫面外——與大盤指數列預設收合是同一個考量。 */}
+          <div className="flex gap-1 text-xs">
+            {[
+              ['daily', '日 K'],
+              ['intraday', '分時'],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setChartMode(key)}
+                className={`rounded-lg border px-2.5 py-1 transition ${
+                  chartMode === key
+                    ? 'border-sky-600 bg-sky-950/40 text-sky-300'
+                    : 'border-slate-700 text-slate-400 hover:border-slate-500'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {chartMode === 'intraday' && (
+            <IntradayChart
+              data={intraday}
+              loading={loadingIntraday}
+              error={intradayError}
+            />
+          )}
+
+          {chartMode === 'daily' && candles.length === 0 ? (
             <div className="py-8 text-center text-sm text-slate-500">載入歷史資料中…</div>
           ) : (
             <>
-              <PriceChart candles={candles} shortPeriod={item.maShort} longPeriod={item.maLong} />
+              {chartMode === 'daily' && (
+                <PriceChart candles={candles} shortPeriod={item.maShort} longPeriod={item.maLong} />
+              )}
 
               {/* 均線參數 */}
               <div className="flex flex-wrap items-center gap-2 text-xs">

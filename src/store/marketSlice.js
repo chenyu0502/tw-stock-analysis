@@ -50,6 +50,17 @@ export const loadHistory = createAsyncThunk(
   }
 );
 
+/**
+ * 載入單檔的當日分時走勢。
+ *
+ * 只在使用者把卡片展開並切到分時時才取用——一百多筆的序列不該為了二十幾張
+ * 收合的卡片整批抓回來。伺服器端快取一分鐘，與資料本身的更新頻率對齊。
+ */
+export const loadIntraday = createAsyncThunk('market/loadIntraday', async ({ code }) => {
+  const data = await api.fetchIntraday(code);
+  return { code, data };
+});
+
 /** 載入單檔的三大法人買賣超歷史序列。 */
 export const loadInstitutionalHistory = createAsyncThunk(
   'market/loadInstitutionalHistory',
@@ -119,6 +130,10 @@ const initialState = {
   institutional: {},
   /** 各檔的法人買賣超歷史，鍵為代號，值為 { available, series, reason } */
   institutionalHistory: {},
+  /** 各檔的當日分時走勢，鍵為代號，值為 { points, prevClose, session, latest } */
+  intraday: {},
+  /** 分時取用失敗的訊息，鍵為代號。分時屬加值資訊，不寫進全域 error。 */
+  intradayError: {},
   valuation: {},
   /** 各檔的基本面深度指標，鍵為代號，值為 { available, bands, revenue, income, ... } */
   fundamentals: {},
@@ -142,6 +157,7 @@ const initialState = {
     chips: false,
     fundamentals: false,
     peers: false,
+    intraday: false,
     indices: false,
   },
   error: null,
@@ -253,6 +269,20 @@ const marketSlice = createSlice({
           available: false,
           reason: action.error.message,
         };
+      })
+
+      .addCase(loadIntraday.pending, (state, action) => {
+        state.loading.intraday = true;
+        delete state.intradayError[action.meta.arg.code];
+      })
+      .addCase(loadIntraday.fulfilled, (state, action) => {
+        state.loading.intraday = false;
+        state.intraday[action.payload.code] = action.payload.data;
+      })
+      .addCase(loadIntraday.rejected, (state, action) => {
+        state.loading.intraday = false;
+        // 分時屬加值資訊，取不到時記在該檔自身，不蓋掉更重要的報價錯誤訊息。
+        state.intradayError[action.meta.arg.code] = action.error.message;
       })
 
       .addCase(loadInstitutionalHistory.pending, (state) => {
