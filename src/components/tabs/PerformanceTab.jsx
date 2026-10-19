@@ -26,6 +26,7 @@ import {
   positionSummary,
   todayPnl,
   reconcileShares,
+  reconcileToday,
 } from '../../lib/performance.js';
 import {
   money,
@@ -276,6 +277,20 @@ export default function PerformanceTab() {
     };
   }, [holdings, quotes]);
 
+  // 今日各檔損益與月曆今天那格的逐檔對帳。純計算，不發任何請求。
+  const reconcile = useMemo(
+    () =>
+      reconcileToday({
+        curve,
+        holdings,
+        quotes,
+        transactions,
+        historyByCode: history,
+        todayDate: todayDate(),
+      }),
+    [curve, holdings, quotes, transactions, history]
+  );
+
   // 成本法的部位彙總，與持股頁共用同一個函式，兩頁數字保證一致。
   const position = useMemo(() => positionSummary(holdings, quotes, cash), [holdings, quotes, cash]);
 
@@ -490,6 +505,59 @@ export default function PerformanceTab() {
             </tbody>
           </table>
         </div>
+
+        {/* 與月曆對不上時，逐檔指出差額來自哪一檔。
+            這兩個數字的口徑本該完全一致，實務上卻反覆出現落差，而每一次都要人工
+            去比對 API 回應才找得出原因。所需資料畫面上全都有，不發任何請求，
+            因此常駐——只有真的有落差時才會出現。 */}
+        {reconcile && reconcile.items.length > 0 && (
+          <div className="mt-3 rounded-lg border border-amber-900/60 bg-amber-950/30 p-2.5">
+            <p className="text-[12px] leading-relaxed text-amber-400">
+              上方合計與每日損益月曆今天那格相差 {money(reconcile.total)}。
+              差額來自下列標的的「昨收基準」不一致——
+              卡片用即時報價的昨收（除息日為除息參考價），月曆用歷史 K 線前一交易日的收盤
+              （原始收盤）。除息日兩者必然相差一個配息，程式會把配息加回；
+              配息缺漏或金額不符時落差就會留下來。
+            </p>
+            <div className="mt-2 overflow-x-auto">
+              <table className="tabular w-full min-w-[34rem] text-[11px]">
+                <thead>
+                  <tr className="text-slate-500">
+                    <th className="pb-1 text-left font-normal">標的</th>
+                    <th className="pb-1 text-right font-normal">股數</th>
+                    <th className="pb-1 text-right font-normal">報價昨收</th>
+                    <th className="pb-1 text-right font-normal">曲線昨收</th>
+                    <th className="pb-1 text-right font-normal">今日配息</th>
+                    <th className="pb-1 text-right font-normal">卡片</th>
+                    <th className="pb-1 text-right font-normal">月曆</th>
+                    <th className="pb-1 text-right font-normal">差額</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reconcile.items.map((r) => (
+                    <tr key={r.code} className="border-t border-slate-800/60 text-slate-400">
+                      <td className="py-1 text-left text-slate-300">{r.code}</td>
+                      <td className="py-1 text-right">{int(r.shares)}</td>
+                      <td className="py-1 text-right">{num(r.quotePrevClose)}</td>
+                      <td className="py-1 text-right">{num(r.curvePrevClose)}</td>
+                      <td className="py-1 text-right">{r.dividend ? num(r.dividend, 4) : '—'}</td>
+                      <td className="py-1 text-right">{money(r.cardPnl)}</td>
+                      <td className="py-1 text-right">{money(r.curvePnl)}</td>
+                      <td className="py-1 text-right font-medium text-amber-300">
+                        {money(r.diff)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+              非除息日兩個昨收應該相等——K 線的近期收盤已校正為證交所與櫃買的官方行情。
+              不相等代表那一檔的官方校正失敗。差額不影響兩天的合計，只讓今天與下一個
+              交易日的逐日數字各錯一段。
+            </p>
+          </div>
+        )}
       </Panel>
 
       {/* 每日損益月曆 */}

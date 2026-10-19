@@ -453,8 +453,107 @@ export function buildEquityCurve({
       // 截至當日的累計配息。配息實際入帳約在除息後一個多月，「帳上現金」通常還沒收到，
       // 往回推算的歷史現金會因此整段偏低。判斷現金是否真的為負時要把這部分加回。
       cumulativeDividend: row.cumulativeDividend,
+      // 各檔當日的評價價格。曲線內部本來就算出來了，帶出去供對帳使用——
+      // 「今日各檔損益」與月曆今天那格若對不上，差額必定來自某一檔的昨收基準，
+      // 而要指出是哪一檔，就得有曲線實際用的那個價格。見 reconcileToday。
+      priceByCode: row.priceByCode,
     };
   });
+}
+
+/**
+ * 逐檔比對「今日各檔損益」與月曆今天那格，找出差額來自哪一檔。
+ *
+ * 兩個數字的口徑本該完全一致，實務上卻反覆出現落差，而每一次都要人工去比對
+ * API 回應才找得出原因。差額可以寫成一條恆等式：
+ *
+ *   今日損益ᵢ − 月曆貢獻ᵢ = 股數ᵢ × ( 曲線昨收ᵢ − 報價昨收ᵢ ) − 除息前持股ᵢ × 配息ᵢ
+ *
+ * 兩個「昨收」來源不同：卡片用即時報價的 `prevClose`（除息日是**除息參考價**），
+ * 曲線用歷史 K 線前一交易日的收盤（**原始收盤**）。除息日兩者必然相差一個配息，
+ * 程式因此在除息日把配息加回；配息資料若缺漏或金額不符，落差就會留下來。
+ * 非除息日兩者應該相等，因為 K 線的近期收盤已校正為官方值——不相等就代表
+ * 那一檔的官方校正失敗了。
+ *
+ * 這個函式把上式逐檔算出來，只回報真的有落差的那幾檔。所需資料畫面上全都有，
+ * 不發任何請求。
+ *
+ * @param {object} params
+ * @param {object[]} params.curve buildEquityCurve 的結果
+ * @param {object[]} params.holdings
+ * @param {Record<string, object>} params.quotes
+ * @param {object[]} params.transactions 原始交易紀錄（未正規化）
+ * @param {Record<string, object>} params.historyByCode
+ * @param {string} params.todayDate
+ * @returns {{items: object[], total: number}|null} 曲線最後一天不是今天時回傳 null
+ */
+export function reconcileToday({
+  curve,
+  holdings,
+  quotes,
+  transactions = [],
+  historyByCode = {},
+  todayDate,
+}) {
+  const last = curve[curve.length - 1];
+  const prev = curve[curve.length - 2];
+  if (!last || !prev || last.date !== todayDate) return null;
+
+  // 今天的淨成交股數，用來還原「前一交易日收盤時的持股」。
+  // 配息看的是那個數字——除息日當天才買進的部位不參與這次配息。
+  const tradedToday = {};
+  for (const tx of transactions) {
+    if (tx.date !== todayDate) continue;
+    tradedToday[tx.code] = (tradedToday[tx.code] ?? 0) + (tx.shares ?? 0);
+  }
+
+  const items = [];
+  let total = 0;
+
+  for (const h of holdings) {
+    const quote = quotes[h.code];
+    const change = quote?.change ?? null;
+    const price = quote?.price ?? null;
+    const cardPnl = change === null ? null : h.shares * change;
+
+    const curveToday = last.priceByCode?.[h.code] ?? null;
+    const curvePrev = prev.priceByCode?.[h.code] ?? null;
+    const dividend =
+      (historyByCode[h.code]?.dividends ?? []).find((d) => d.date === todayDate)?.amount ?? 0;
+    const sharesBeforeToday = h.shares - (tradedToday[h.code] ?? 0);
+
+    const curvePnl =
+      curveToday === null || curvePrev === null
+        ? null
+        : h.shares * (curveToday - curvePrev) + sharesBeforeToday * dividend;
+
+    const diff = cardPnl === null || curvePnl === null ? null : cardPnl - curvePnl;
+    // 一元以內視為浮點誤差，不列出。
+    if (diff !== null && Math.abs(diff) < 1) continue;
+
+    total += diff ?? 0;
+    items.push({
+      code: h.code,
+      shares: h.shares,
+      quotePrevClose:
+        change === null || !Number.isFinite(price) ? null : round2(price - change),
+      curvePrevClose: curvePrev === null ? null : round2(curvePrev),
+      dividend: dividend ? round2(dividend) : 0,
+      cardPnl,
+      curvePnl,
+      diff,
+    });
+  }
+
+  return {
+    items: items.sort((a, b) => Math.abs(b.diff ?? 0) - Math.abs(a.diff ?? 0)),
+    total,
+  };
+}
+
+/** 收到兩位小數。價格經過浮點運算後會帶出一長串尾數。 */
+function round2(value) {
+  return Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
 }
 
 /* ------------------------------------------------------------------ */
