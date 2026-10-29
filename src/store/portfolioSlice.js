@@ -295,9 +295,88 @@ const portfolioSlice = createSlice({
       existing.updatedAt = Date.now();
     },
 
+    /**
+     * 修正一筆既有的交易。
+     *
+     * payload: { id, patch: { date?, shares?, price?, fee?, note? } }
+     *
+     * **帳上現金會按差額同步調整。** 記錄交易時現金已經被扣（或加）過一次，
+     * 改了股數或價格就必須補上差額，否則現金會一直停在用錯誤數字算出來的值——
+     * 這正是「賣出時價格填錯、帳上現金跟著錯、而且沒有地方可以修」的成因。
+     *
+     * **刻意不動持股的股數與成本均價。** avgCost 是逐筆累進維護的加權平均，
+     * 後續的買進已經把它折進去了，無法從單一筆交易反推回去。硬算只會得到一個
+     * 看似合理卻對不上任何對帳單的數字。持股列本來就可以直接編輯股數與成本均價，
+     * 那是比較誠實的修正路徑，介面上也會這樣說明。
+     */
+    updateTransaction(state, action) {
+      const { id, patch = {} } = action.payload;
+      const tx = state.transactions.find((t) => t.id === id);
+      if (!tx) return;
+
+      const num = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
+      const oldShares = tx.shares;
+      const oldPrice = tx.price;
+      const oldFee = Number.isFinite(tx.fee) ? tx.fee : 0;
+      const oldCashDelta = oldShares * oldPrice + oldFee;
+
+      const shares = patch.shares === undefined ? oldShares : num(patch.shares, oldShares);
+      const price = patch.price === undefined ? oldPrice : num(patch.price, oldPrice);
+      const fee = patch.fee === undefined ? oldFee : num(patch.fee, oldFee);
+
+      /*
+       * 已實現損益重算時的成本基準，從原本那一筆反推。
+       *
+       *   realized = (price − avgCost) × |shares| − fee
+       *   ⇒ avgCost = price − (realized + fee) / |shares|
+       *
+       * 用當下持股的 avgCost 不行：全數賣出時那個部位已經不存在了，
+       * 而部分賣出之後 avgCost 也可能被後來的買進改過。反推只用這一筆自己的
+       * 三個欄位，不依賴任何會變動的狀態。
+       */
+      let realized = tx.realized;
+      if (shares < 0) {
+        if (Number.isFinite(tx.realized) && oldShares < 0) {
+          const basis = oldPrice - (tx.realized + oldFee) / Math.abs(oldShares);
+          realized = (price - basis) * Math.abs(shares) - fee;
+        }
+        // 原本沒有已實現損益（賣出時查不到持股）就維持留白，不憑空算一個出來。
+      } else {
+        // 改成買進之後，已實現損益不再適用。
+        realized = null;
+      }
+
+      tx.date = patch.date || tx.date;
+      tx.shares = shares;
+      tx.price = price;
+      tx.fee = fee;
+      if (patch.note !== undefined) tx.note = patch.note;
+      tx.realized = realized;
+      // 合併時要靠它判斷哪一邊比較新，少了它另一台裝置的舊值會贏。
+      tx.updatedAt = Date.now();
+
+      const delta = shares * price + fee - oldCashDelta;
+      if (Number.isFinite(delta)) state.cash -= delta;
+    },
+
+    /**
+     * 刪除一筆交易，帳上現金同步反向調整。
+     *
+     * 刪除的語意是「這筆交易沒有發生過」，因此記錄時扣掉（或加上）的現金要還回來。
+     * 這與 dropTransactionsForCodes 不同——那個是「清除進出紀錄但保留持股」，
+     * 屬於整理資料的意圖，不該動現金。
+     *
+     * 持股的股數與成本均價同樣不動，理由見 updateTransaction。
+     */
     removeTransaction(state, action) {
-      markDeleted(state, 'transactions', action.payload);
-      state.transactions = state.transactions.filter((t) => t.id !== action.payload);
+      const id = action.payload;
+      const tx = state.transactions.find((t) => t.id === id);
+      if (tx) {
+        const cashDelta = tx.shares * tx.price + (Number.isFinite(tx.fee) ? tx.fee : 0);
+        if (Number.isFinite(cashDelta)) state.cash += cashDelta;
+      }
+      markDeleted(state, 'transactions', id);
+      state.transactions = state.transactions.filter((t) => t.id !== id);
     },
 
     /**
@@ -375,6 +454,7 @@ export const {
   removeWatch,
   updateWatch,
   recordTrade,
+  updateTransaction,
   removeTransaction,
   dropTransactionsForCodes,
   removeHolding,

@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import {
   recordTrade,
+  updateTransaction,
+  removeTransaction,
   removeHolding,
   updateHolding,
   recordCashFlow,
@@ -34,6 +36,7 @@ import { positionSummary } from '../../lib/performance.js';
 import { money, pct, num, int, changeColor } from '../../lib/format.js';
 import StockCard from '../StockCard.jsx';
 import ExDividendNotice from '../ExDividendNotice.jsx';
+import TransactionList from '../TransactionList.jsx';
 import RiskScan from '../RiskScan.jsx';
 
 /** 單一標的市值佔比超過此門檻即提出集中度警示。 */
@@ -216,6 +219,22 @@ export default function HoldingsTab() {
     // 留著舊日期很容易讓下一筆也被誤記到過去。
     setFlowDate(today());
     setMessage('');
+  }
+
+  /**
+   * 刪除一筆交易，先確認。
+   *
+   * 與資金流水同一個理由：刪除不只是把一列拿掉，帳上現金會同步反向調整。
+   */
+  function handleRemoveTransaction(tx) {
+    const cashDelta = tx.shares * tx.price + (Number.isFinite(tx.fee) ? tx.fee : 0);
+    const direction = cashDelta > 0 ? '增加' : '減少';
+    const ok = window.confirm(
+      `刪除 ${tx.date} ${tx.code} ${int(tx.shares)} 股 @ ${num(tx.price)}？\n\n` +
+        `帳上現金會同步${direction} ${money(Math.abs(cashDelta))}。\n` +
+        '持股的股數與成本均價不會跟著改，需要時請在上方持股列直接編輯。'
+    );
+    if (ok) dispatch(removeTransaction(tx.id));
   }
 
   /**
@@ -415,6 +434,15 @@ export default function HoldingsTab() {
           <span className="text-slate-500">成交會自動加減帳上現金</span>
           （買進扣、賣出加），不必再到上面記一筆資金進出。
         </p>
+
+        {/* 交易清單。預設收合——平常看持股不需要看到全部歷史。
+            存在的理由是：價格填錯之後帳上現金就一直是錯的，而原本沒有任何地方
+            可以修正，只能另記一筆資金流水去湊，而那會讓權益曲線多算一次。 */}
+        <TransactionList
+          transactions={transactions}
+          onUpdate={(id, patch) => dispatch(updateTransaction({ id, patch }))}
+          onRemove={handleRemoveTransaction}
+        />
       </form>
 
       {message && <p className="text-xs text-amber-500">{message}</p>}

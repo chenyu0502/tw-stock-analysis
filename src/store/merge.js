@@ -106,7 +106,11 @@ export function mergePortfolio(local, cloud) {
    */
   const stamp = (item) => Math.max(Number(item.updatedAt) || 0, Number(item.addedAt) || 0);
   const byAddedAt = (item, prev) => stamp(item) > stamp(prev);
-  // 逐筆事件沒有 addedAt，同 id 視為同一筆，保留先取到的即可。
+  // 資金流水沒有 addedAt 也不可編輯，同 id 視為同一筆，保留先取到的即可。
+  //
+  // **交易不能用這個比較器。** 交易可以編輯（修正填錯的價格或股數），
+  // 保留先取到的會讓改過的那一邊隨機落敗——症狀是「改好了，重開又變回去」。
+  // 它們有 addedAt，編輯時也會寫入 updatedAt，因此改用 byAddedAt。
   const keepFirst = () => false;
   const byDate = (x, y) => String(x.date).localeCompare(String(y.date));
 
@@ -126,7 +130,7 @@ export function mergePortfolio(local, cloud) {
     // 雲端可能還有同一檔的其他 id（來自另一台裝置或更早的工作階段），
     // 那些不在 id 名單裡，合併時會照樣回來——就是「清除了又出現」。
     // 清除之後才記的交易帶有較新的 addedAt，不受影響。
-    transactions: merge(local.transactions, cloud.transactions, 'id', deleted.transactions, keepFirst)
+    transactions: merge(local.transactions, cloud.transactions, 'id', deleted.transactions, byAddedAt)
       .filter((t) => {
         const clearedAt = deleted.transactionCodes[String(t.code)];
         return !clearedAt || (t.addedAt ?? 0) > clearedAt;
