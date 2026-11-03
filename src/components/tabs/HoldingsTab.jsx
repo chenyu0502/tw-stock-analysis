@@ -62,7 +62,7 @@ export default function HoldingsTab() {
   const quotes = useSelector((s) => s.market.quotes);
   const exDividend = useSelector((s) => s.market.exDividend);
 
-  const [form, setForm] = useState({ code: '', shares: '', price: '', date: today() });
+  const [form, setForm] = useState({ code: '', shares: '', price: '', fee: '', date: today() });
   const [flowAmount, setFlowAmount] = useState('');
   // 資金進出的日期。原本沒有這個欄位、一律記成今天，於是補記一筆過去的入金
   // （或誤刪後想還原）時，那筆會落在錯的日子上，歷史現金整段偏掉。
@@ -108,17 +108,15 @@ export default function HoldingsTab() {
     [rows, summary.totalValue]
   );
 
-  // 手續費與證交稅的參考試算。
+  // 手續費與證交稅的試算，供「帶入試算」使用。
   //
-  // 這個數字不會被計入成本：成本均價由使用者直接填入且已含費用，
-  // 程式再加一次就會重複計算。這裡只是讓使用者在手邊沒有對帳單時，
-  // 能自行推算含費用的單位成本。
+  // 只是試算：券商折讓每家不同（這裡用常見的六折），最低收費與捨入方式也有差異，
+  // 真正的金額要看對帳單。因此不自動填進欄位，由使用者按一下才帶入、帶入後仍可改。
   const estimatedCost = useMemo(() => {
     const shares = Number(form.shares);
     const price = Number(form.price);
     if (!form.code || !Number.isFinite(shares) || !Number.isFinite(price) || price <= 0) return null;
-    const cost = tradeCost({ code: form.code, shares, price });
-    return { ...cost, unitCost: price + cost.total / Math.abs(shares) };
+    return tradeCost({ code: form.code, shares, price });
   }, [form]);
 
   function handleTrade(e) {
@@ -144,8 +142,15 @@ export default function HoldingsTab() {
       return;
     }
 
-    dispatch(recordTrade({ code, shares, price, date: form.date }));
-    setForm({ code: '', shares: '', price: '', date: today() });
+    // 費用欄留空代表「價格已含費用」，此時 fee 為零，行為與這個欄位出現之前完全相同。
+    const fee = form.fee === '' ? 0 : Number(form.fee);
+    if (!Number.isFinite(fee) || fee < 0) {
+      setMessage('手續費與交易稅需為零或正數');
+      return;
+    }
+
+    dispatch(recordTrade({ code, shares, price, fee, date: form.date }));
+    setForm({ code: '', shares: '', price: '', fee: '', date: today() });
     setMessage('');
   }
 
@@ -381,7 +386,7 @@ export default function HoldingsTab() {
 
       {/* 記錄交易 */}
       <form onSubmit={handleTrade} className="space-y-2">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
           <input
             value={form.code}
             onChange={(e) => setForm({ ...form, code: e.target.value })}
@@ -399,10 +404,20 @@ export default function HoldingsTab() {
           <input
             value={form.price}
             onChange={(e) => setForm({ ...form, price: e.target.value })}
-            placeholder="成本均價（含費用）"
+            placeholder="成交價"
             type="number"
             // 券商對帳單的成本均價常帶到小數點後四位，輸入時如實保留，顯示才取兩位。
             step="0.0001"
+            className="tabular rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
+          />
+          <input
+            value={form.fee}
+            onChange={(e) => setForm({ ...form, fee: e.target.value })}
+            placeholder="手續費/交易稅"
+            type="number"
+            min="0"
+            step="1"
+            title="該筆交易的手續費與交易稅合計，買進賣出都是扣掉這筆錢"
             className="tabular rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm placeholder:text-slate-600 focus:border-sky-600 focus:outline-none"
           />
           <input
@@ -421,15 +436,28 @@ export default function HoldingsTab() {
             <Plus size={15} /> 記錄交易
           </button>
           {estimatedCost && (
-            <span className="tabular text-xs text-slate-500">
-              參考：手續費約 {money(estimatedCost.brokerFee)}
-              {estimatedCost.tax > 0 && ` ＋ 證交稅約 ${money(estimatedCost.tax)}`}
-              ，若上方填的是純成交價，含費用單位成本約 {num(estimatedCost.unitCost, 4)}
+            <span className="tabular flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, fee: String(estimatedCost.total) })}
+                className="rounded border border-slate-700 px-2 py-1 text-slate-300 transition hover:border-sky-600 hover:text-sky-400"
+              >
+                帶入試算 {money(estimatedCost.total)}
+              </button>
+              <span>
+                手續費 {money(estimatedCost.brokerFee)}
+                {estimatedCost.tax > 0 && ` ＋ 證交稅 ${money(estimatedCost.tax)}`}
+                （六折試算，實際金額請照對帳單）
+              </span>
             </span>
           )}
         </div>
         <p className="text-[12px] leading-relaxed text-slate-600">
-          成本均價請填券商對帳單上已含手續費的數字，程式不會再自行加計。參考試算僅供換算，不影響記錄。
+          <span className="text-slate-500">成交價填成交的價格，手續費與交易稅填那一筆的實收金額</span>
+          ——兩者都是流出：買進時攤進成本均價，賣出時從已實現損益扣掉，帳上現金兩邊都少。
+          <br />
+          若填的是券商對帳單上<span className="text-slate-500">已含費用的成本均價</span>
+          ，費用欄請留空，行為與這個欄位出現之前相同，不會重複加計。
           <br />
           <span className="text-slate-500">成交會自動加減帳上現金</span>
           （買進扣、賣出加），不必再到上面記一筆資金進出。

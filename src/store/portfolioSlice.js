@@ -210,9 +210,15 @@ const portfolioSlice = createSlice({
      * payload: { code, shares, price, date?, fee?, note? }
      * shares 正為買進、負為賣出。
      *
-     * price 的定義是**已含手續費與交易稅的單位成本**，也就是券商對帳單上的成本均價。
-     * 使用者直接填入實際數字，程式不再自行加計費用，否則會重複計算一次。
-     * 因此 fee 預設為零；仍保留這個欄位，供日後需要拆分帳務時使用。
+     * price 是**成交價**，fee 是**該筆交易的手續費與交易稅合計**，兩者分開填。
+     * 費用的流向在三個地方一致：
+     *
+     * - **帳上現金**：恆為流出。買進扣得更多，賣出收得更少。
+     * - **成本均價**：買進時攤進 avgCost，所以成本會略高於成交價。
+     * - **已實現損益**：賣出時從 realized 扣掉。
+     *
+     * fee 省略或為零時，price 就被當成已含費用的單位成本，行為與這個欄位
+     * 出現之前完全相同——舊資料不需要轉檔，介面上也保留這個填法。
      */
     recordTrade(state, action) {
       const { code, shares, price } = action.payload;
@@ -263,7 +269,7 @@ const portfolioSlice = createSlice({
         state.holdings.push({
           code,
           shares,
-          // price 已是含費用的單位成本，原樣採用，不再加計 fee。
+          // 費用攤進單位成本。fee 為零時就等於成交價，也就是「price 已含費用」的填法。
           avgCost: price + fee / shares,
           note: action.payload.note ?? '',
           maShort: action.payload.maShort ?? DEFAULT_MA.short,
