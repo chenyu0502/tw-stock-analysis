@@ -89,57 +89,74 @@ export default function TransactionList({ transactions, onUpdate, onRemove }) {
       {open && (
         <>
           <div className="mt-2 overflow-x-auto">
-            <table className="tabular w-full min-w-[40rem] text-[12px]">
+            {/* table-fixed 加 colgroup 是對齊的關鍵。
+                欄寬若由內容決定，點下鉛筆那一刻輸入框會把該列的欄位撐寬，
+                整張表的欄位就跟著錯開；釘死欄寬之後，編輯列與其他列共用同一組邊界。
+                日期欄取 8rem 是為了容納原生日期輸入框（比純文字的日期寬得多）。 */}
+            <table className="tabular w-full min-w-[44rem] table-fixed whitespace-nowrap text-[12px]">
+              {/* whitespace-nowrap 不可省：table-fixed 的欄位放不下時預設會折行，
+                  「NT$ -478,500」會在空白處斷成兩行，看起來又是沒對齊。 */}
+              <colgroup>
+                <col className="w-32" />
+                <col className="w-14" />
+                <col className="w-20" />
+                <col className="w-20" />
+                <col className="w-18" />
+                <col className="w-28" />
+                <col className="w-24" />
+                <col className="w-14" />
+              </colgroup>
               <thead>
                 <tr className="text-slate-500">
-                  <th className="pb-1 text-left font-normal">日期</th>
-                  <th className="pb-1 text-left font-normal">代號</th>
-                  <th className="pb-1 text-right font-normal">股數</th>
-                  <th className="pb-1 text-right font-normal">價格</th>
-                  <th className="pb-1 text-right font-normal">手續費</th>
-                  <th className="pb-1 text-right font-normal">現金變動</th>
-                  <th className="pb-1 text-right font-normal">已實現</th>
-                  <th className="pb-1" />
+                  <th className="px-1 pb-1 text-left font-normal">日期</th>
+                  <th className="px-1 pb-1 text-left font-normal">代號</th>
+                  <th className="px-1 pb-1 text-right font-normal">股數</th>
+                  <th className="px-1 pb-1 text-right font-normal">價格</th>
+                  <th className="px-1 pb-1 text-right font-normal">手續費</th>
+                  <th className="px-1 pb-1 text-right font-normal">現金變動</th>
+                  <th className="px-1 pb-1 text-right font-normal">已實現</th>
+                  <th className="px-1 pb-1" />
                 </tr>
               </thead>
               <tbody>
                 {visible.map((tx) =>
                   editingId === tx.id ? (
                     <tr key={tx.id} className="border-t border-slate-800/60">
-                      <td className="py-1 pr-1">
+                      {/* 儲存格本身不留左右內距，由輸入框自己的 px-1 補上，
+                          輸入框裡的數字才會落在與其他列相同的右邊界上。 */}
+                      <td className="px-0 py-1">
                         <Field
                           type="date"
                           value={draft.date}
                           onChange={(v) => setDraft({ ...draft, date: v })}
-                          className="w-28"
                         />
                       </td>
-                      <td className="py-1 text-slate-400">{tx.code}</td>
-                      <td className="py-1 pr-1">
+                      <td className="px-1 py-1 text-slate-400">{tx.code}</td>
+                      <td className="px-0 py-1">
                         <Field
                           value={draft.shares}
                           onChange={(v) => setDraft({ ...draft, shares: v })}
-                          className="w-20 text-right"
+                          className="text-right"
                         />
                       </td>
-                      <td className="py-1 pr-1">
+                      <td className="px-0 py-1">
                         <Field
                           value={draft.price}
                           onChange={(v) => setDraft({ ...draft, price: v })}
-                          className="w-20 text-right"
+                          className="text-right"
                         />
                       </td>
-                      <td className="py-1 pr-1">
+                      <td className="px-0 py-1">
                         <Field
                           value={draft.fee}
                           onChange={(v) => setDraft({ ...draft, fee: v })}
-                          className="w-16 text-right"
+                          className="text-right"
                         />
                       </td>
-                      <td className="py-1 text-right text-slate-600" colSpan={2}>
+                      <td className="px-1 py-1 text-right text-slate-600" colSpan={2}>
                         儲存後重算
                       </td>
-                      <td className="py-1">
+                      <td className="px-1 py-1">
                         <div className="flex justify-end gap-1">
                           <IconButton
                             onClick={() => commit(tx)}
@@ -156,22 +173,22 @@ export default function TransactionList({ transactions, onUpdate, onRemove }) {
                     </tr>
                   ) : (
                     <tr key={tx.id} className="border-t border-slate-800/60 text-slate-400">
-                      <td className="py-1 text-left">{tx.date}</td>
-                      <td className="py-1 text-left text-slate-300">{tx.code}</td>
+                      <td className="px-1 py-1 text-left">{tx.date}</td>
+                      <td className="px-1 py-1 text-left text-slate-300">{tx.code}</td>
                       {/* 買進為正、賣出為負，沿用輸入時的慣例，不另外標買賣字樣。 */}
-                      <td className="py-1 text-right">{int(tx.shares)}</td>
-                      <td className="py-1 text-right">{num(tx.price)}</td>
-                      <td className="py-1 text-right text-slate-600">
+                      <td className="px-1 py-1 text-right">{int(tx.shares)}</td>
+                      <td className="px-1 py-1 text-right">{num(tx.price)}</td>
+                      <td className="px-1 py-1 text-right text-slate-600">
                         {Number.isFinite(tx.fee) && tx.fee !== 0 ? num(tx.fee, 0) : '—'}
                       </td>
                       {/* 記錄時帳上現金實際變動的方向與金額，與 recordTrade 同一個式子。 */}
-                      <td className="py-1 text-right">
+                      <td className="px-1 py-1 text-right">
                         {money(-(tx.shares * tx.price + (tx.fee ?? 0)))}
                       </td>
-                      <td className="py-1 text-right">
+                      <td className="px-1 py-1 text-right">
                         {Number.isFinite(tx.realized) ? money(tx.realized) : '—'}
                       </td>
-                      <td className="py-1">
+                      <td className="px-1 py-1">
                         <div className="flex justify-end gap-1">
                           <IconButton onClick={() => startEdit(tx)} title="修正這筆">
                             <Pencil size={12} />
@@ -218,13 +235,20 @@ export default function TransactionList({ transactions, onUpdate, onRemove }) {
   );
 }
 
+/**
+ * 編輯列的輸入框。
+ *
+ * `w-full` 是刻意的：固定寬度會把欄位撐成與其他列不同的寬度，表格就錯開了。
+ * 搭配 table-fixed 的欄寬，輸入框填滿儲存格，邊界與非編輯列一致。
+ * `min-w-0` 則是為了讓原生日期輸入框肯縮到欄寬之內——它有自己的內建最小寬度。
+ */
 function Field({ value, onChange, className = '', type = 'text' }) {
   return (
     <input
       type={type}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className={`tabular rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-[12px] text-slate-100 focus:border-sky-600 focus:outline-none ${className}`}
+      className={`tabular w-full min-w-0 rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[12px] text-slate-100 focus:border-sky-600 focus:outline-none ${className}`}
     />
   );
 }
