@@ -269,6 +269,8 @@ export async function quoteHandler(query) {
       };
     }
 
+    // 先補救 MIS 沒給價格的那幾檔，再做收盤校正——官方收盤價的優先權最高。
+    await fillMissingPrices(quotes);
     await applyOfficialClose(quotes);
 
     return {
@@ -279,6 +281,73 @@ export async function quoteHandler(query) {
   });
 
   return { status: 200, body };
+}
+
+/**
+ * 一次報價最多為幾檔向 Yahoo 補價。
+ *
+ * 補價是逐檔請求，沒有上限的話，MIS 整批失常時會一口氣送出幾十個請求，
+ * 那正是先前把函式打到逾時的那種請求形狀。超過這個數量代表問題是系統性的，
+ * 補不補都不會讓畫面變對，寧可讓那些檔維持「—」。
+ */
+const PRICE_FILL_LIMIT = 8;
+
+/**
+ * MIS 沒給價格時，改用 Yahoo 的分時資料補上。
+ *
+ * **為什麼需要第二個來源。** 跌停鎖死時 MIS 的 `z`（最新成交價）、`b`（委買）、
+ * `a`（委賣）三個欄位實測全是空的——2026-11-06 的 8046 南電就是這樣。
+ * 一開始以為補看委賣就能解決（跌停時賣單堆在跌停價），實際上線後顯示「—」，
+ * 證明委賣那一欄也沒有。MIS 在那個狀態下到底還有沒有別的欄位帶著價格，
+ * 無從得知：證交所 MIS 擋雲端機房 IP，開發環境抓不到那一刻的原始回應。
+ *
+ * 與其繼續猜 MIS 的欄位，不如換一個**已經確認是對的**來源。同一時間使用者
+ * 看到的分時圖是正確的，而分時圖走的就是 Yahoo 這條線。
+ *
+ * 只在 `price` 為 null 時才動作，也就是「今天有成交量卻一個價格都取不到」。
+ * 正常情形一次請求都不會多送。
+ *
+ * @param {Record<string, object>} quotes 會就地修改
+ */
+async function fillMissingPrices(quotes) {
+  const targets = Object.entries(quotes).filter(([, q]) => q.price === null);
+  if (targets.length === 0 || targets.length > PRICE_FILL_LIMIT) return;
+
+  await Promise.all(
+    targets.map(async ([code, q]) => {
+      try {
+        const suffixes = q.market === 'OTC' ? ['.TWO', '.TW'] : ['.TW', '.TWO'];
+        for (const suffix of suffixes) {
+          const json = await fetchJson(`${YAHOO_CHART}/${code}${suffix}?interval=1m&range=1d`);
+          const result = json?.chart?.result?.[0];
+          if (!result) continue;
+
+          // meta 的現價是 Yahoo 自己認定的最新成交價。取不到就退回
+          // 最後一筆有成交的分鐘線——盤中最後幾分鐘可能是 null，要由後往前找。
+          const closes = result.indicators?.quote?.[0]?.close ?? [];
+          let last = null;
+          for (let i = closes.length - 1; i >= 0; i -= 1) {
+            if (Number.isFinite(closes[i])) {
+              last = closes[i];
+              break;
+            }
+          }
+          const price = round2(result.meta?.regularMarketPrice) ?? round2(last);
+          if (price === null || price <= 0) continue;
+
+          q.price = price;
+          q.change = q.prevClose === null ? null : round2(price - q.prevClose);
+          q.changePercent =
+            q.change !== null && q.prevClose ? (q.change / q.prevClose) * 100 : null;
+          // 這個數字不是 MIS 給的。留一個記號，下次對不上時才查得出來源。
+          q.priceSource = 'yahoo';
+          return;
+        }
+      } catch {
+        // 補不到就維持 null，顯示「—」。絕不退回昨收——那會偽裝成平盤。
+      }
+    })
+  );
 }
 
 /**
