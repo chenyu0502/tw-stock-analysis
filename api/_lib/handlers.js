@@ -293,6 +293,15 @@ export async function quoteHandler(query) {
 const PRICE_FILL_LIMIT = 8;
 
 /**
+ * 收盤後官方資料還沒出來時，最多為幾檔向 Yahoo 問收盤價。
+ *
+ * 比盤中那個上限寬，因為這裡的「失敗」是每天都會發生的正常現象——證交所的
+ * 日行情本來就要收盤後一段時間才公布，不是上游故障。數量也不會失控：
+ * 只有 MIS 自己沒看到收盤的那幾檔才會走到這裡，而且結果快取三十分鐘。
+ */
+const CLOSE_FILL_LIMIT = 20;
+
+/**
  * MIS 沒給價格時，改用 Yahoo 的分時資料補上。
  *
  * **為什麼需要第二個來源。** 跌停鎖死時 MIS 的 `z`（最新成交價）、`b`（委買）、
@@ -315,9 +324,37 @@ async function fillMissingPrices(quotes) {
 
   await Promise.all(
     targets.map(async ([code, q]) => {
-      try {
-        const suffixes = q.market === 'OTC' ? ['.TWO', '.TW'] : ['.TW', '.TWO'];
-        for (const suffix of suffixes) {
+      const price = await yahooPrice(code, q.market, `yahooprice:${code}`, TTL.INTRADAY);
+      if (price !== null) applyPrice(q, price);
+    })
+  );
+}
+
+/**
+ * 向 Yahoo 取某一檔當日的最新成交價。
+ *
+ * 兩個呼叫端共用：盤中補價（MIS 給不出價格）與收盤校正的最後手段。
+ * 兩者的時效需求不同，因此快取鍵與 TTL 由呼叫端決定。
+ *
+ * @param {string} code
+ * @param {string} market 'OTC' 或 'TSE'，只用來決定先試哪個後綴
+ * @param {string} cacheKey
+ * @param {number} ttl
+ * @returns {Promise<number|null>} 取不到回 null，絕不回昨收或零
+ */
+async function yahooPrice(code, market, cacheKey, ttl) {
+  try {
+    // 用 withPartialCache 而不是 withCache：取不到時回傳的 null 也會被快取，
+    // 收盤那條路的 TTL 是三十分鐘，Yahoo 一次抽風就會把「查無價格」鎖住半小時。
+    // complete 為 false 時只快取一分鐘，下一次輪詢就會重試。
+    return await withPartialCache(cacheKey, ttl, async () => {
+      // 與 historyHandler 相同的後綴策略，理由見 peekMarket。
+      const suffixes = market === 'OTC' ? ['.TWO', '.TW'] : ['.TW', '.TWO'];
+      for (const suffix of suffixes) {
+        // try 必須在迴圈**裡面**。對照表沒快取時後綴順序是猜的，猜錯那一次
+        // Yahoo 回 404、fetchJson 直接拋出；try 放在迴圈外會讓上櫃股再也試不到
+        // .TWO 就放棄。intradayHandler 同樣把 try 放在迴圈裡，理由相同。
+        try {
           const json = await fetchJson(`${YAHOO_CHART}/${code}${suffix}?interval=1m&range=1d`);
           const result = json?.chart?.result?.[0];
           if (!result) continue;
@@ -333,21 +370,35 @@ async function fillMissingPrices(quotes) {
             }
           }
           const price = round2(result.meta?.regularMarketPrice) ?? round2(last);
-          if (price === null || price <= 0) continue;
-
-          q.price = price;
-          q.change = q.prevClose === null ? null : round2(price - q.prevClose);
-          q.changePercent =
-            q.change !== null && q.prevClose ? (q.change / q.prevClose) * 100 : null;
-          // 這個數字不是 MIS 給的。留一個記號，下次對不上時才查得出來源。
-          q.priceSource = 'yahoo';
-          return;
+          if (price !== null && price > 0) return { value: price, complete: true };
+        } catch {
+          // 這個後綴不通，換下一個。
         }
-      } catch {
-        // 補不到就維持 null，顯示「—」。絕不退回昨收——那會偽裝成平盤。
       }
-    })
-  );
+      return { value: null, complete: false };
+    });
+  } catch {
+    // 取不到就回 null，由呼叫端決定如何呈現。絕不退回昨收——那會偽裝成平盤。
+    return null;
+  }
+}
+
+/**
+ * 把新的價格寫回一筆報價，並同步重算漲跌。
+ *
+ * 抽出來是因為漏算 `changePercent` 會讓畫面出現「有漲跌金額卻沒有百分比」，
+ * 而三個呼叫端各寫一次遲早會漏。
+ *
+ * @param {object} q 會就地修改
+ * @param {number} price
+ * @param {string} [source] 非 MIS 的來源記號
+ */
+function applyPrice(q, price, source = 'yahoo') {
+  q.price = price;
+  q.change = q.prevClose === null ? null : round2(price - q.prevClose);
+  q.changePercent = q.change !== null && q.prevClose ? (q.change / q.prevClose) * 100 : null;
+  // 這個數字不是 MIS 給的。留一個記號，下次對不上時才查得出來源。
+  if (source) q.priceSource = source;
 }
 
 /**
@@ -359,33 +410,67 @@ async function fillMissingPrices(quotes) {
  * 而且那個數字會被拿去跟券商對帳。
  *
  * **只在收盤後才動作，盤中完全不額外請求。** 盤中的即時價本來就該用 MIS，
- * 而官方行情要收盤後才公布。判斷依據是 MIS 自己回報的成交時間。
+ * 而官方行情要收盤後才公布。
+ *
+ * **閘門看的是台北的牆上時鐘，不是 MIS 回報的成交時間。** 原本用
+ * `tradeTime >= '13:30'` 當「已經收盤」的代理，那對冷門股是錯的：MIS 的 `t`
+ * 會停在最後一筆成交，收盤前沒再成交的那幾檔永遠過不了閘門，校正整個跳過。
+ * 而那幾檔正是最需要校正的——它們的 `z` 停在收盤前，與收盤集合競價定出來的
+ * 收盤價不同。實際症狀就是「各檔現價有些不是最後的收盤價」，只錯一部分。
+ * 改用牆上時鐘之後條件只會變寬，原本會校正的仍然會校正。
+ *
+ * **官方資料還沒公布時，退而用 Yahoo。** 證交所的日行情要收盤後一段時間才
+ * 出得來，13:30 到那之前官方查無今日資料，原本就只能沿用 MIS 的舊價。
+ * 這段空窗期 Yahoo 已經有收盤價了（使用者看到的分時圖是對的）。
+ *
+ * 退路只給 `tradeTime < '13:30'` 的那幾檔，也就是 MIS 自己沒看到收盤的。
+ * MIS 的 `t` 已經到 13:30 代表它收到了收盤快照，`z` 就是收盤價，不必多問。
+ * 這把額外請求限制在真正可疑的少數幾檔，而不是收盤後每一檔都多打一次。
  *
  * @param {Record<string, object>} quotes 會就地修改
  */
 async function applyOfficialClose(quotes) {
-  const todayCompact = isoToCompact(taipeiToday());
-  const entries = Object.entries(quotes).filter(
-    ([, q]) => q.tradeDate === todayCompact && String(q.tradeTime ?? '') >= '13:30'
-  );
+  // 台北的牆上時鐘。取法與 taipeiToday 相同，理由見該函式。
+  const taipeiClock = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(11, 16);
+  if (taipeiClock < '13:30') return;
+
+  const today = taipeiToday();
+  const todayCompact = isoToCompact(today);
+  const entries = Object.entries(quotes).filter(([, q]) => q.tradeDate === todayCompact);
   if (entries.length === 0) return;
 
-  const month = taipeiToday().slice(0, 7);
+  const month = today.slice(0, 7);
+  // MIS 沒看到收盤的那幾檔，官方也查無資料時才向 Yahoo 問。
+  const unseen = [];
+
   await Promise.all(
     entries.map(async ([code, q]) => {
       try {
         const map = await loadOfficialMonth(code, q.market === 'OTC' ? 'OTC' : 'TSE', month);
-        const row = map.get(taipeiToday());
-        if (!row || !Number.isFinite(row.close) || row.close <= 0) return;
-        q.price = row.close;
+        const row = map.get(today);
+        if (!row || !Number.isFinite(row.close) || row.close <= 0) {
+          if (String(q.tradeTime ?? '') < '13:30') unseen.push([code, q]);
+          return;
+        }
         q.open = row.open ?? q.open;
         q.high = row.high ?? q.high;
         q.low = row.low ?? q.low;
-        q.change = q.prevClose === null ? null : row.close - q.prevClose;
-        q.changePercent = q.change !== null && q.prevClose ? (q.change / q.prevClose) * 100 : null;
+        // 官方收盤價是最權威的來源，蓋掉先前任何補價，連記號一起清掉。
+        applyPrice(q, row.close, null);
+        delete q.priceSource;
       } catch {
         // 取不到就沿用 MIS 的價格，不讓報價整批失敗。
+        if (String(q.tradeTime ?? '') < '13:30') unseen.push([code, q]);
       }
+    })
+  );
+
+  if (unseen.length === 0 || unseen.length > CLOSE_FILL_LIMIT) return;
+  await Promise.all(
+    unseen.map(async ([code, q]) => {
+      // 收盤後這個數字不會再變，快取可以放長，收盤後反覆輪詢不會一直打 Yahoo。
+      const price = await yahooPrice(code, q.market, `yahooclose:${code}:${today}`, TTL.DAILY);
+      if (price !== null) applyPrice(q, price);
     })
   );
 }
