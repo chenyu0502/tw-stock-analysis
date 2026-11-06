@@ -221,8 +221,18 @@ export async function quoteHandler(query) {
       const prevClose = positiveOrNull(toNumber(row.y));
       // z 為最新成交價。無成交時 MIS 可能回傳 "-"，也可能回傳 "0.0000"，
       // 後者若直接採用會算出負百分之百的跌幅，因此零與負值一律視為無效。
+      //
+      // z 無效時退回委託簿。**買賣兩側都要看**，否則鎖死的跌停會顯示成平盤：
+      // 跌停鎖死時賣單堆在跌停價、買盤全被吃光，b 是空的；MIS 又常在沒有成交的
+      // 那一個 snapshot 把 z 回成 "-"，於是 z → b → y 一路退到昨收，畫面顯示
+      // 平盤、漲跌 0.00。實際發生過：2026-11-06 的 8046 南電跌停 875，
+      // 畫面顯示 972（昨收），跌停一打開就恢復正常。
+      //
+      // 漲停鎖死是鏡像的情形：a 空、b 等於漲停價，原本的 bestBid 就能接住，
+      // 這也是為什麼過去只有跌停會出錯。
       const bestBid = positiveOrNull(toNumber(String(row.b ?? '').split('_')[0]));
-      const price = positiveOrNull(toNumber(row.z)) ?? bestBid ?? prevClose;
+      const bestAsk = positiveOrNull(toNumber(String(row.a ?? '').split('_')[0]));
+      const price = positiveOrNull(toNumber(row.z)) ?? bestBid ?? bestAsk ?? prevClose;
       const change = price !== null && prevClose !== null ? price - prevClose : null;
 
       quotes[code] = {
