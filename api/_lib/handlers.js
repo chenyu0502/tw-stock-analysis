@@ -232,7 +232,20 @@ export async function quoteHandler(query) {
       // 這也是為什麼過去只有跌停會出錯。
       const bestBid = positiveOrNull(toNumber(String(row.b ?? '').split('_')[0]));
       const bestAsk = positiveOrNull(toNumber(String(row.a ?? '').split('_')[0]));
-      const price = positiveOrNull(toNumber(row.z)) ?? bestBid ?? bestAsk ?? prevClose;
+      const traded = positiveOrNull(toNumber(row.z)) ?? bestBid ?? bestAsk;
+
+      // 三個都落空時，只有**還沒開盤**才可以退回昨收。
+      //
+      // 盤前沒有成交很正常，昨收就是當下正確的參考價，漲跌為零也是對的。
+      // 但今天已經有成交量卻一個價格都取不到，那是上游這一刻沒給，不是平盤——
+      // 這時回昨收等於讓畫面用一個自信的錯數字蓋掉「不知道」，而且錯得很安靜：
+      // 今日損益會顯示 0，整頁合計跟著少掉這一檔的真實損益。
+      //
+      // 寧可給 null。todayPnl 與 positionSummary 都認得 null（損益顯示「—」、
+      // 市值退回以成本計），這是全站既有的「報價缺漏」路徑，不會壞掉別的地方。
+      const volume = toNumber(row.v);
+      const hasTraded = Number.isFinite(volume) && volume > 0;
+      const price = traded ?? (hasTraded ? null : prevClose);
       const change = price !== null && prevClose !== null ? price - prevClose : null;
 
       quotes[code] = {
@@ -246,7 +259,7 @@ export async function quoteHandler(query) {
         high: toNumber(row.h),
         low: toNumber(row.l),
         // MIS 的 v 是累積成交量，單位已是張。
-        volume: toNumber(row.v),
+        volume,
         limitUp: toNumber(row.u),
         limitDown: toNumber(row.w),
         change,
