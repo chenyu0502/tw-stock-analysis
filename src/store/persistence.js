@@ -7,7 +7,7 @@
  * 2. 登入後從雲端讀取，並與「這個帳號自己的」本機資料合併。
  * 3. 寫入雲端採防抖動，避免每次按鍵都打一次 Firestore。
  *
- * 換帳號的順序（見 src/stock/main.jsx）必須是：先在未登入狀態下 hydrate 本機資料
+ * 換帳號的順序（見 src/main.jsx）必須是：先在未登入狀態下 hydrate 本機資料
  * （middleware 沒有 uid，不寫本機也不寫雲端），再 setUser，最後 syncFromCloud。
  * 反過來的話，空的 hydrate 會帶著 uid 排進 2 秒後的雲端寫入，雲端讀取若慢於 2 秒，
  * 會把使用者的雲端持股覆寫成空的。

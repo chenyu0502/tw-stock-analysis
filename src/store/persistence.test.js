@@ -87,7 +87,7 @@ describe('persistence middleware', () => {
     vi.advanceTimersByTime(2500);
     cloud.savePortfolio.mockClear();
 
-    // 與 src/stock/main.jsx 的 stopSync 相同順序
+    // 與 src/main.jsx 的 stopSync 相同順序
     store.dispatch(setUser(null));
     store.dispatch(hydrate({}));
     vi.advanceTimersByTime(5000);

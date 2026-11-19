@@ -1,6 +1,6 @@
 /*
- * 只掃描台股自己的原始碼（src/stock/）。預設會掃整個專案，連 Claude Flow
- * 用到的 container、table 等 class 名稱也會產生 Tailwind 工具類別。
+ * 只掃描 src/ 底下的原始碼，不掃 README、api/ 等其他檔案，
+ * 避免文件裡出現的字詞被當成 class 名稱產生多餘的 Tailwind 工具類別。
  */
 @import 'tailwindcss' source('./');
 
