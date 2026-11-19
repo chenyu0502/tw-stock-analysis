@@ -20,6 +20,7 @@ import LevelLadder from '../LevelLadder.jsx';
 import ValuationBands from '../ValuationBands.jsx';
 import PeerComparison from '../PeerComparison.jsx';
 import HealthScore from '../HealthScore.jsx';
+import GeminiKeyPanel from '../GeminiKeyPanel.jsx';
 import { computeHealth } from '../../lib/health.js';
 
 /**
@@ -196,8 +197,12 @@ export default function AiTab() {
 
   if (targets.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-slate-800 py-12 text-center text-sm text-slate-500">
-        請先到分析頁或持股頁加入標的
+      <div className="space-y-4">
+        {/* 還沒有標的也先讓人知道 AI 需要自己的金鑰，可以先設定好 */}
+        <GeminiKeyPanel />
+        <div className="rounded-xl border border-dashed border-slate-800 py-12 text-center text-sm text-slate-500">
+          請先到分析頁或持股頁加入標的
+        </div>
       </div>
     );
   }
@@ -206,6 +211,9 @@ export default function AiTab() {
 
   return (
     <div className="space-y-4">
+      {/* 每個人用自己的 Gemini 金鑰；剛才因為沒設定金鑰而失敗時把區塊標示出來 */}
+      <GeminiKeyPanel highlight={result?.code === 'need-user-key'} />
+
       {/* 標的選擇 */}
       <div className="flex flex-wrap items-center gap-2">
         <select

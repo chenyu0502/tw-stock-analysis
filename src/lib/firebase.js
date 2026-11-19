@@ -1,36 +1,24 @@
 /**
- * Firebase 初始化與登入、雲端同步。
+ * Firebase 登入與雲端同步。
  *
- * 設定值來自 .env.local。這組值會打包進前端 bundle，本來就是公開資訊，
- * 實際的存取控制由 Firestore 安全規則負責（見 firestore.rules）。
+ * Firebase 實例在 src/claudeFlow/firebaseApp.js 初始化，設定與 Claude Flow 一致，
+ * 兩邊在同一個網域下共用登入狀態。實際的存取控制由 Firestore 安全規則負責。
  */
 
-import { initializeApp } from 'firebase/app';
 import {
-  getAuth,
   GoogleAuthProvider,
   signInWithPopup,
   signInWithRedirect,
   signOut as fbSignOut,
   onAuthStateChanged,
 } from 'firebase/auth';
-import { getFirestore, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { auth, db } from '../claudeFlow/firebaseApp.js';
 
-const config = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-};
+export { auth, db };
 
-/** 環境變數未設定時不初始化，讓應用程式以純本機模式運作而不是整個崩潰。 */
-export const isFirebaseConfigured = Boolean(config.apiKey && config.projectId);
-
-const app = isFirebaseConfigured ? initializeApp(config) : null;
-export const auth = app ? getAuth(app) : null;
-export const db = app ? getFirestore(app) : null;
+/** Claude Flow 一定會初始化 Firebase（正式專案或 Emulator），保留此旗標供既有程式判斷。 */
+export const isFirebaseConfigured = true;
 
 /**
  * Google 登入。優先使用彈窗，被瀏覽器攔截時退回轉址模式。

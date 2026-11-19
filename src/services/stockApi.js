@@ -3,7 +3,25 @@
  *
  * 一律走自家 /api/* 代理，不直接呼叫證交所或 Yahoo。
  * 好處是沒有跨域問題、不依賴公開 CORS proxy，且 FinMind token 留在伺服器端不外洩。
+ *
+ * 每個請求都帶 Firebase ID token：/api/* 只開放給 Claude Flow 的管理員（見 api/_lib/auth.js）。
  */
+
+import { auth } from '../lib/firebase.js';
+import { getGeminiKey } from '../lib/geminiKey.js';
+
+/**
+ * 取得帶登入憑證的請求標頭。
+ *
+ * getIdToken() 會在憑證快到期時自動換新，不需要自己處理過期。
+ * 未登入時不帶標頭，讓伺服器回 401，錯誤訊息照常顯示在畫面上。
+ * @returns {Promise<Record<string, string>>}
+ */
+async function authHeaders() {
+  const user = auth?.currentUser;
+  if (!user) return {};
+  return { Authorization: `Bearer ${await user.getIdToken()}` };
+}
 
 /**
  * 呼叫自家 API 端點。
@@ -18,7 +36,7 @@ async function callApi(path, params = {}) {
       .map(([k, v]) => [k, String(v)])
   );
 
-  const res = await fetch(`/api/${path}?${search}`);
+  const res = await fetch(`/api/${path}?${search}`, { headers: await authHeaders() });
   const json = await res.json().catch(() => null);
 
   if (!res.ok) {
@@ -159,7 +177,12 @@ export function fetchUniverse() {
 export async function fetchAnalysis(payload) {
   const res = await fetch('/api/analyze', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(await authHeaders()),
+      // 使用者自己的 Gemini 金鑰（見 lib/geminiKey.js）；沒設定時不帶，伺服器會回「請先設定」。
+      ...(getGeminiKey() ? { 'X-Gemini-Key': getGeminiKey() } : {}),
+    },
     body: JSON.stringify(payload),
   });
   const json = await res.json().catch(() => null);

@@ -12,3 +12,6 @@ yarn-error.log*
 .vscode/*
 !.vscode/extensions.json
 .idea
+
+# Firebase Emulator 的 log
+*-debug.log

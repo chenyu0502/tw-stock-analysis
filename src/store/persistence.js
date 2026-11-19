@@ -2,25 +2,33 @@
  * 資料持久化：localStorage 為主，Firestore 為跨裝置同步。
  *
  * 策略說明：
- * 1. 未登入時只寫 localStorage，應用程式完全可用。
- * 2. 登入後從雲端讀取，並與本機資料合併，避免使用者在未登入狀態輸入的資料被清掉。
+ * 1. 本機資料**按帳號分開存**（鍵名帶 uid）。併入 Claude Flow、開放給所有登入的使用者後，
+ *    同一台電腦換人登入時，前一個人的持股絕不能被合併進下一個人的雲端文件。
+ * 2. 登入後從雲端讀取，並與「這個帳號自己的」本機資料合併。
  * 3. 寫入雲端採防抖動，避免每次按鍵都打一次 Firestore。
+ *
+ * 換帳號的順序（見 src/stock/main.jsx）必須是：先在未登入狀態下 hydrate 本機資料
+ * （middleware 沒有 uid，不寫本機也不寫雲端），再 setUser，最後 syncFromCloud。
+ * 反過來的話，空的 hydrate 會帶著 uid 排進 2 秒後的雲端寫入，雲端讀取若慢於 2 秒，
+ * 會把使用者的雲端持股覆寫成空的。
  */
 
 import { hydrate } from './portfolioSlice.js';
 import { mergePortfolio } from './merge.js';
 import { loadPortfolio, savePortfolio, watchPortfolio } from '../lib/firebase.js';
 
-const STORAGE_KEY = 'tw-stock-portfolio-v1';
+/** 舊版（未分帳號）的鍵名，只用於一次性搬移。 */
+export const LEGACY_STORAGE_KEY = 'tw-stock-portfolio-v1';
 const CLOUD_WRITE_DEBOUNCE_MS = 2000;
 
-/**
- * 從 localStorage 讀取資料。
- * @returns {object|null}
- */
-export function readLocal() {
+/** 某個帳號的本機資料鍵名 */
+export function storageKeyFor(uid) {
+  return `${LEGACY_STORAGE_KEY}:${uid}`;
+}
+
+function readKey(key) {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(key);
     return raw ? JSON.parse(raw) : null;
   } catch {
     // 資料毀損時視同沒有資料，不讓應用程式因為舊格式而無法啟動。
@@ -29,15 +37,44 @@ export function readLocal() {
 }
 
 /**
- * 寫入 localStorage。
+ * 讀取某個帳號的本機資料。
+ * @param {string} uid
+ * @returns {object|null}
+ */
+export function readLocal(uid) {
+  if (!uid) return null;
+  return readKey(storageKeyFor(uid));
+}
+
+/**
+ * 寫入某個帳號的本機資料。
+ * @param {string} uid
  * @param {object} data
  */
-export function writeLocal(data) {
+export function writeLocal(uid, data) {
+  if (!uid) return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(storageKeyFor(uid), JSON.stringify(data));
   } catch {
     // 無痕模式或配額用盡時會失敗，這不影響當次操作，靜默略過。
   }
+}
+
+/**
+ * 取出並移除舊版未分帳號的本機資料（一次性搬移用）。
+ *
+ * 只能交給管理員：開放給所有人之前，這個網站上只有管理員能進台股頁，
+ * 舊版那份資料一定屬於管理員。交給其他帳號就是把管理員的持股送給別人。
+ * @returns {object|null}
+ */
+export function takeLegacyLocal() {
+  const data = readKey(LEGACY_STORAGE_KEY);
+  try {
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch {
+    // 移除失敗不影響搬移結果。
+  }
+  return data;
 }
 
 /**
@@ -58,10 +95,11 @@ export function createPersistenceMiddleware() {
     if (serialized === lastSerialized) return result;
     lastSerialized = serialized;
 
-    writeLocal(portfolio);
-
+    // 沒有 uid（未登入、正在換帳號）時本機與雲端都不寫，避免寫進錯誤的帳號。
     const uid = auth.user?.uid;
     if (uid) {
+      writeLocal(uid, portfolio);
+
       clearTimeout(timer);
       timer = setTimeout(() => {
         savePortfolio(uid, portfolio).catch(() => {

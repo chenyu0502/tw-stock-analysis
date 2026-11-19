@@ -26,7 +26,8 @@ export default function UpdateBanner() {
     async function check() {
       try {
         // 查詢字串加上時間戳並停用快取，否則檢查本身可能拿到快取的舊版本號。
-        const res = await fetch(`/version.json?t=${Date.now()}`, { cache: 'no-store' });
+        // BASE_URL 是 /stock/：version.json 跟著網站放在 /stock/ 底下。
+        const res = await fetch(`${import.meta.env.BASE_URL}version.json?t=${Date.now()}`, { cache: 'no-store' });
         if (!res.ok) return;
         const data = await res.json();
         if (!cancelled && data?.buildId && data.buildId !== __BUILD_ID__) {

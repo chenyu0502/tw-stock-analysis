@@ -476,9 +476,10 @@ function buildChipBlock(chips) {
 /**
  * 把上游錯誤翻譯成使用者看得懂、且知道該怎麼處理的說明。
  * @param {Error} err
+ * @param {'user'|'server'} [keySource] 這次用的是使用者自己的金鑰還是伺服器的，決定錯誤訊息要請誰去修
  * @returns {string}
  */
-function describeError(err) {
+function describeError(err, keySource = 'server') {
   const message = err?.message ?? '';
 
   if (/50[023]|忙碌|overload|UNAVAILABLE/i.test(message)) {
@@ -511,13 +512,35 @@ function describeError(err) {
     );
   }
   if (/API key|API_KEY_INVALID|401|403|PERMISSION/i.test(message)) {
-    return 'Gemini 金鑰無效或權限不足，請確認 GEMINI_API_KEY 設定正確。';
+    return keySource === 'user'
+      ? '你的 Gemini API Key 無效或權限不足，請在 AI 頁上方重新設定。'
+      : 'Gemini 金鑰無效或權限不足，請確認伺服器的 GEMINI_API_KEY 設定正確。';
   }
   if (/逾時|abort|timeout/i.test(message)) {
     return 'Gemini 回應逾時，請稍候再試。';
   }
   return `AI 分析失敗：${message}`;
 }
+
+/**
+ * 決定這次 AI 分析用哪一把 Gemini 金鑰。
+ *
+ * 開放給所有登入的使用者後，AI 解讀改由**每個人用自己的金鑰**（前端以 X-Gemini-Key 標頭帶來），
+ * 費用與額度算在各自帳上。只有管理員在沒帶金鑰時可退用伺服器的 GEMINI_API_KEY，
+ * 一般使用者沒帶金鑰就不能用 AI，絕不動用伺服器的金鑰。
+ *
+ * @param {object} env
+ * @param {{ role?: string, geminiKey?: string|null }} [ctx] 由 adapter 帶入的已驗證使用者
+ * @returns {{ apiKey: string, source: 'user'|'server' } | null}
+ */
+export function resolveGeminiKey(env = {}, ctx = {}) {
+  if (ctx.geminiKey) return { apiKey: ctx.geminiKey, source: 'user' };
+  if (ctx.role === 'admin' && env.GEMINI_API_KEY) return { apiKey: env.GEMINI_API_KEY, source: 'server' };
+  return null;
+}
+
+/** 使用者沒有設定自己的金鑰時，回應中的 reason 代碼（前端據此把金鑰設定區塊標示出來）。 */
+export const NEED_USER_KEY = 'need-user-key';
 
 /**
  * POST /api/analyze
@@ -527,18 +550,21 @@ function describeError(err) {
  *
  * @param {object} input
  * @param {object} env
+ * @param {{ role?: string, geminiKey?: string|null }} [ctx]
  * @returns {Promise<{status:number, body:object, noStore?:boolean}>}
  */
-export async function analyzeHandler(input, env = {}) {
+export async function analyzeHandler(input, env = {}, ctx = {}) {
   const { code, price, levels, indicators, recent } = input;
 
-  if (!env.GEMINI_API_KEY) {
+  const key = resolveGeminiKey(env, ctx);
+  if (!key) {
     return {
       status: 200,
       noStore: true,
       body: {
         available: false,
-        reason: '伺服器未設定 GEMINI_API_KEY，無法產生 AI 分析',
+        code: NEED_USER_KEY,
+        reason: '請先在 AI 頁上方設定你自己的 Gemini API Key，才能使用 AI 解讀。',
       },
     };
   }
@@ -559,7 +585,7 @@ export async function analyzeHandler(input, env = {}) {
   let result;
   try {
     result = await generateJson({
-      apiKey: env.GEMINI_API_KEY,
+      apiKey: key.apiKey,
       model: env.GEMINI_MODEL,
       systemInstruction: SYSTEM_INSTRUCTION,
       prompt: buildPrompt(input),
@@ -568,7 +594,7 @@ export async function analyzeHandler(input, env = {}) {
   } catch (err) {
     // 上游的原始訊息（例如「上游回應 503」）對使用者沒有意義，
     // 也看不出這是暫時性問題還是設定錯誤，翻譯成可行動的說明。
-    return { status: 200, noStore: true, body: { available: false, reason: describeError(err) } };
+    return { status: 200, noStore: true, body: { available: false, reason: describeError(err, key.source) } };
   }
 
   return {

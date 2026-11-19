@@ -1,4 +1,8 @@
-@import 'tailwindcss';
+/*
+ * 只掃描台股自己的原始碼（src/stock/）。預設會掃整個專案，連 Claude Flow
+ * 用到的 container、table 等 class 名稱也會產生 Tailwind 工具類別。
+ */
+@import 'tailwindcss' source('./');
 
 @theme {
   /* 台股慣例：紅漲綠跌。整站以這兩個語意色為準，不要直接用 red/green。 */

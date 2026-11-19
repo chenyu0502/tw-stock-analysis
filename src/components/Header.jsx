@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useSelector, useDispatch, useStore } from 'react-redux';
-import { LogIn, LogOut, RefreshCw } from 'lucide-react';
+import { ArrowLeft, LogIn, LogOut, RefreshCw } from 'lucide-react';
 import { signInWithGoogle, signOut, isFirebaseConfigured } from '../lib/firebase.js';
 import { setAuthError } from '../store/authSlice.js';
 import { loadQuotes, loadDailyStats } from '../store/marketSlice.js';
@@ -83,6 +83,14 @@ export default function Header() {
   return (
     <header className="sticky top-0 z-20 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3">
+        {/* 併入 Claude Flow 後的返回入口：台股是獨立頁面，用一般連結整頁切換。 */}
+        <a
+          href="/"
+          className="rounded-lg border border-slate-700 p-2 text-slate-400 transition hover:border-slate-500 hover:text-white"
+          title="回 Claude Flow"
+        >
+          <ArrowLeft size={16} />
+        </a>
         <div className="flex-1">
           <h1 className="text-base font-semibold tracking-tight">台股分析</h1>
           {/* 有了自動更新之後，「資料是什麼時候的」變成必須看得到的資訊：

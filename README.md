@@ -13,22 +13,66 @@
 
 資金頁依需求移除，資金進出改為併入持股頁的資金流水紀錄。
 
+## 與 Claude Flow 的關係
+
+台股分析以 [Claude Flow](https://github.com/chenyu0502/Claude_Flow) 的子網站上線：使用者開的是 Claude Flow 網域的 `/stock/`，
+Claude Flow 的 `vercel.json` 把 `/stock/*` 與 `/api/*` **轉送**到本專案的 Vercel 部署（tw-stock-analysis.vercel.app）。
+本 repo 合併到 `master`、Vercel 部署完就生效，Claude Flow 不需要重新部署。
+
+- **共用登入**：瀏覽器看到的是同一個網域，加上本專案與 Claude Flow 使用同一個 Firebase 專案與設定（`src/claudeFlow/firebaseApp.js`），
+  登入狀態自動共用。登入、註冊、使用者管理都在 Claude Flow，本專案沒有登入頁：未登入時導向 Claude Flow 的 `/login`。
+- **直接打開本專案網址**（tw-stock-analysis.vercel.app）時，網域不同、登入不共用，所以轉回 Claude Flow 的同一個路徑（`VITE_CLAUDE_FLOW_URL`）。
+- **網站放在 `/stock/` 底下**（`vite.config.js` 的 `base` 與輸出目錄 `dist/stock`），和 Claude Flow 的路徑對得上。
+- **使用權限**：所有登入、未停用、Email 已驗證（Email/密碼帳號）的 Claude Flow 使用者都能用。`src/main.jsx` 先讀 Claude Flow 的
+  `users/{uid}` 確認，才啟動雲端同步並顯示畫面。`src/claudeFlow/` 裡是這些判斷在本專案的副本，
+  與 Claude Flow 的 `src/auth/emailVerification.ts`、`api/_lib/auth.js`、`firestore.rules` 同一套邏輯，**改的時候兩個 repo 要一起改**。
+- **Firestore 規則不在本 repo**，只有一份，在 Claude Flow 的 `firestore.rules`（包含本專案的 `portfolios`）。
+- **持股彼此隔離**：雲端是 `portfolios/{自己的 uid}`，Firestore 規則只允許本人讀寫（管理員也不例外）。本機 localStorage 也按帳號分開存
+  （鍵名 `tw-stock-portfolio-v1:{uid}`），同一台電腦換人登入，前一個人的持股不會被合併進下一個人的帳號。換帳號時要先在未登入狀態下
+  還原本機資料、再標記登入、再與雲端同步（見 `persistence.js` 開頭說明），順序反過來可能把雲端持股覆寫成空的。
+- **後端 API 只開放給登入的使用者**：前端每個請求都帶 Firebase ID token，`api/_lib/auth.js` 拿這個 token 去讀 Firestore 的 `users/{uid}`。
+  token 偽造或過期時 Google 會直接拒絕，讀到的文件同時用來確認未停用並取得 role。不需要 service account 金鑰。
+  驗證結果快取 60 秒，所以被停用的帳號最多還能呼叫 60 秒。
+- **AI 解讀用自己的金鑰**：AI 頁上方可填 Gemini API Key，只存在使用者的瀏覽器（按帳號分開），送出分析時以 `X-Gemini-Key` 標頭交給
+  `/api/analyze` 轉給 Google，不儲存。一般使用者沒填就不能用 AI；只有管理員沒填時可退用伺服器的 `GEMINI_API_KEY`
+  （`analyze.js` 的 `resolveGeminiKey`）。其他資料（三大法人、估值等）共用伺服器的 `FINMIND_TOKEN` 額度。
+- **API 回應不經 Vercel 邊緣快取**：成功回應只允許瀏覽器快取（`private, max-age=30`）。邊緣快取命中的請求不會進到函式，等於繞過登入驗證。
+
 ## 環境需求
 
-- Node.js 20 以上（開發機實測 v24.19.0）
-- npm 11 以上
+- Node.js 20 以上
+- Java 21 以上（Firebase Emulator 需要）
 
-## 安裝與啟動
+## 本機開發
 
 ```bash
 npm install
+cp .env.example .env.local   # 保留 VITE_USE_EMULATOR=true
 ```
+
+### 單獨開發台股（不需要 Claude Flow）
 
 ```bash
-npm run dev
+npm run emulators   # 終端機 1：Auth :9099、Firestore :8080、UI :4000（沒有載入規則，任何讀寫都允許）
+npm run dev         # 終端機 2：http://localhost:5174/stock/
 ```
 
-開發伺服器啟動於 <http://localhost:5173>。
+打開後會出現「開發模式登入」，按一下就以 Emulator 開發帳號 `dev@example.com` 登入（不存在時自動建立，並建好 Claude Flow 的使用者資料，角色為管理員）。
+`/api/*` 由 `vite-plugin-local-api.js` 掛在開發伺服器上，會連到真正的上游（證交所、Yahoo、FinMind）。
+
+### 連同 Claude Flow 一起開發（和正式環境相同）
+
+Claude Flow 的開發伺服器（:5173）會把 `/stock`、`/api` 轉送到這裡（:5174）。要確認登入、權限、Email 驗證等整合行為時用這個方式：
+
+1. 本專案：`npm run dev`（不用開本專案的 Emulator）
+2. Claude Flow：`npm run emulators`、`node scripts/seed-emulator.mjs`、`npm run dev`（Emulator 會載入正式的 Firestore 規則）
+3. 打開 <http://localhost:5173>，用 `user@example.com` / `password123` 登入後點「台股分析」
+
+## 測試
+
+```bash
+npm test
+```
 
 ## 環境變數
 
@@ -36,20 +80,14 @@ npm run dev
 
 | 變數 | 必要 | 說明 |
 |---|---|---|
-| `VITE_FIREBASE_*` | 否 | Firebase 網頁設定。未填時以純本機模式運作，資料只存 localStorage |
+| `VITE_USE_EMULATOR` | 是 | 本機開發 `true`，正式環境 `false` |
+| `VITE_FIREBASE_*` | 正式環境必要 | Firebase 網頁設定，**必須與 Claude Flow 完全相同**，兩邊才會共用登入狀態 |
+| `VITE_CLAUDE_FLOW_URL` | 正式環境建議 | Claude Flow 的網址，直接打開本專案網址時轉回這裡 |
 | `FINMIND_TOKEN` | 否 | FinMind API token，用於三大法人買賣超走勢、除息提醒的股利發放日，以及 AI 頁的估值分位、同業比較、獲利結構、風險提示。未設定時這些區塊會顯示提示，其餘功能不受影響 |
-| `GEMINI_API_KEY` | 否 | Gemini API 金鑰，用於 AI 型態分析。未設定時 AI 頁的價位結構仍可用，只有解讀部分會顯示提示 |
+| `GEMINI_API_KEY` | 否 | 伺服器的 Gemini API 金鑰，只供管理員沒填自己的金鑰時備用 |
 | `GEMINI_MODEL` | 否 | 覆寫預設模型，預設 `gemini-3.7-flash` |
 
-`VITE_` 前綴的變數會打包進前端，屬公開資訊；`FINMIND_TOKEN` 沒有前綴，只在伺服器端使用，不會外洩。
-
-### Firebase 設定
-
-1. Authentication 啟用 Google 登入。
-2. Authentication → Settings → 授權網域，加入 `localhost` 與正式網域。
-3. Firestore Database → 規則，貼上 `firestore.rules` 的內容後發布。
-
-未完成上述設定時，應用程式仍可使用，只是沒有登入與跨裝置同步。
+`VITE_` 前綴的變數會打包進前端，屬公開資訊；`FINMIND_TOKEN`、`GEMINI_API_KEY` 沒有前綴，只在伺服器端使用，不會外洩。
 
 ## 架構
 
@@ -1374,8 +1412,8 @@ Google 會讓舊模型進入「仍列在模型清單中，但對新使用者回�
 
 ### 金鑰安全
 
-金鑰只存在伺服器端環境變數，前端 bundle 與網路請求的網址中都不會出現。
-參考站是讓使用者把金鑰貼進網頁並存在 localStorage，那等於把金鑰暴露在瀏覽器裡。
+伺服器的金鑰只存在伺服器端環境變數，前端 bundle 與網路請求的網址中都不會出現。
+使用者自己的金鑰存在自己的瀏覽器（按帳號分開），只透過 `X-Gemini-Key` 標頭送到 `/api/analyze` 轉給 Google，伺服器不記錄、不快取。
 
 ### 如何查核模型有沒有捏造價格
 
@@ -1439,7 +1477,7 @@ ATR 與期間高低點也是合法引用來源，只比對價位清單會把合�
 建置時 `vite-plugin-version.js` 把同一個識別碼寫進兩個地方：
 
 - 編譯進 bundle 的 `__BUILD_ID__`，代表「手上這份程式碼是哪一版」
-- `dist/version.json`，代表「伺服器上目前是哪一版」
+- `dist/stock/version.json`（網址 `/stock/version.json`），代表「伺服器上目前是哪一版」
 
 前端比對兩者，不同就顯示提示列。識別碼在 Vercel 上取 commit SHA 前 12 碼，本機建置取時間戳。
 
@@ -1458,10 +1496,12 @@ JSON 本身也不支援註解，說明一律寫在這份文件裡。
 
 ## 部署
 
-推送到 GitHub 後於 Vercel 匯入專案，框架選 Vite，並在專案設定中加入環境變數
-（`VITE_FIREBASE_*` 與 `FINMIND_TOKEN`）。`vercel.json` 已設定好 SPA 轉址規則與 API 路徑排除。
+Vercel 專案 tw-stock-analysis（tw-stock-analysis.vercel.app），合併到 `master` 自動部署。環境變數：
+`VITE_USE_EMULATOR=false`、`VITE_FIREBASE_*`（與 Claude Flow 相同）、`VITE_CLAUDE_FLOW_URL`、`FINMIND_TOKEN`，選填 `GEMINI_API_KEY`、`GEMINI_MODEL`。
 
-部署後記得到 Firebase Authentication 的授權網域加入 Vercel 網域，否則登入會失敗。
+`vercel.json`：根目錄 `/` 轉到 `/stock/`；`/stock/*` 的 SPA 轉址（排除 `assets/` 與 `version.json`）；`/stock/assets/` 長期快取（檔名帶內容雜湊）。
+
+使用者都從 Claude Flow 的網域進來，所以 Firebase 的授權網域只需要 Claude Flow 的網域。
 
 ## 免責聲明
 
