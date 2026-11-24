@@ -287,10 +287,14 @@ export async function quoteHandler(query) {
  * 一次報價最多為幾檔向 Yahoo 補價。
  *
  * 補價是逐檔請求，沒有上限的話，MIS 整批失常時會一口氣送出幾十個請求，
- * 那正是先前把函式打到逾時的那種請求形狀。超過這個數量代表問題是系統性的，
- * 補不補都不會讓畫面變對，寧可讓那些檔維持「—」。
+ * 那正是先前把函式打到逾時的那種請求形狀。超過上限的部分不補，維持「—」。
+ *
+ * 原本是 8，對感興趣清單夠用，對持股清單不夠——績效頁一次要三十檔報價。
+ * 放寬到 20 的理由是每檔的 Yahoo 結果各自快取 60 秒（`TTL.INTRADAY`）、
+ * 併發也會被 `withPartialCache` 合併，所以實際上游請求是每分鐘最多 20 次，
+ * 不是每次報價 20 次。與收盤那條路的上限取同一個數。
  */
-const PRICE_FILL_LIMIT = 8;
+const PRICE_FILL_LIMIT = 20;
 
 /**
  * 收盤後官方資料還沒出來時，最多為幾檔向 Yahoo 問收盤價。
@@ -316,11 +320,19 @@ const CLOSE_FILL_LIMIT = 20;
  * 只在 `price` 為 null 時才動作，也就是「今天有成交量卻一個價格都取不到」。
  * 正常情形一次請求都不會多送。
  *
+ * **超過上限是只補前幾檔，不是整批放棄。** 原本寫成 `> 上限就 return`，
+ * 那在持股多的時候會反過來咬人：績效頁一次要三十檔報價，只要有九檔沒價格，
+ * 整批補價就完全不執行，三十檔全部顯示「—」；而分析頁的感興趣清單只有幾檔，
+ * 缺價數在上限內，同一檔就補得到。使用者看到的就是「分析頁有價、績效頁沒有」。
+ * 上限的用意是限制請求量，不是在壓力大的時候把功能整個關掉。
+ *
  * @param {Record<string, object>} quotes 會就地修改
  */
 async function fillMissingPrices(quotes) {
-  const targets = Object.entries(quotes).filter(([, q]) => q.price === null);
-  if (targets.length === 0 || targets.length > PRICE_FILL_LIMIT) return;
+  const targets = Object.entries(quotes)
+    .filter(([, q]) => q.price === null)
+    .slice(0, PRICE_FILL_LIMIT);
+  if (targets.length === 0) return;
 
   await Promise.all(
     targets.map(async ([code, q]) => {
@@ -465,9 +477,11 @@ async function applyOfficialClose(quotes) {
     })
   );
 
-  if (unseen.length === 0 || unseen.length > CLOSE_FILL_LIMIT) return;
+  // 同樣是「只補前幾檔」而不是整批放棄，理由見 fillMissingPrices。
+  const fill = unseen.slice(0, CLOSE_FILL_LIMIT);
+  if (fill.length === 0) return;
   await Promise.all(
-    unseen.map(async ([code, q]) => {
+    fill.map(async ([code, q]) => {
       // 收盤後這個數字不會再變，快取可以放長，收盤後反覆輪詢不會一直打 Yahoo。
       const price = await yahooPrice(code, q.market, `yahooclose:${code}:${today}`, TTL.DAILY);
       if (price !== null) applyPrice(q, price);
